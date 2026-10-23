@@ -1,0 +1,15 @@
+# env
+.env
+# java
+target/
+*.class
+.idea/
+*.iml
+# node
+node_modules/
+.next/
+out/
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
