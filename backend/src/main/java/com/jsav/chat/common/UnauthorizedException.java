@@ -1,0 +1,7 @@
+package com.jsav.chat.common;
+
+public class UnauthorizedException extends RuntimeException {
+  public UnauthorizedException(String message) {
+    super(message);
+  }
+}
