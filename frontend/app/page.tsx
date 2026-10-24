@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError, Server, api, clearToken, getToken } from "@/lib/api";
@@ -64,7 +65,9 @@ export default function Home() {
       ) : (
         <ul>
           {servers.map((s) => (
-            <li key={s.id}>{s.name}</li>
+            <li key={s.id}>
+              <Link href={`/servers/${s.id}`}>{s.name}</Link>
+            </li>
           ))}
         </ul>
       )}

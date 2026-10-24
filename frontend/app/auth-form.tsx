@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ApiError, api, setToken } from "@/lib/api";
+import { ApiError, api, setToken, takeNext } from "@/lib/api";
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -21,7 +21,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         ? await api.register(email, password, String(form.get("displayName")))
         : await api.login(email, password);
       setToken(res.token);
-      router.push("/");
+      router.push(takeNext() ?? "/");
     } catch (err) {
       if (err instanceof ApiError) {
         const first = Object.values(err.body.fields)[0];
