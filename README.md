@@ -11,7 +11,7 @@ search) built around two guarantees that are tested on purpose:
 Java 21 + Spring Boot 4 (`backend/`), Next.js (`frontend/`), PostgreSQL, Redis, RabbitMQ.
 
 The design document is [`DESIGN.md`](DESIGN.md) (in Spanish), with decisions in
-[`docs/adr/`](docs/adr). Status: milestone 1 of 9.
+[`docs/adr/`](docs/adr). Status: milestone 2 of 9.
 
 ## Run
 

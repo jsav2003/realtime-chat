@@ -222,8 +222,9 @@ invariante, que deben ser cero.
 
 Una tabla de verdad generada como tests: cada endpoint HTTP y cada destino STOMP, cruzado
 con cada tipo de usuario (owner, admin, member, miembro de otro servidor, no autenticado,
-expulsado hace un segundo), con la respuesta esperada (permitido, 401, 404). Un test por
-celda. Si alguien agrega un endpoint y no lo pone en la matriz, un test falla.
+expulsado hace un segundo), con la respuesta esperada (permitido, 401, 403 o 404). Es 404
+si el usuario no puede ver el recurso (no es miembro, o el canal es privado y no está en
+él) y 403 si lo ve pero su rol no alcanza. Un test por celda. Si alguien agrega un endpoint y no lo pone en la matriz, un test falla.
 
 ### 8.3 Concurrencia de componentes
 
