@@ -9,4 +9,13 @@ public enum Role {
   public String dbValue() {
     return name().toLowerCase();
   }
+
+  public static Role fromDb(String value) {
+    return valueOf(value.toUpperCase());
+  }
+
+  /** Owner y admin administran el servidor. */
+  public boolean canAdminister() {
+    return this == OWNER || this == ADMIN;
+  }
 }

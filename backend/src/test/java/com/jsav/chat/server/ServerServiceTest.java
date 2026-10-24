@@ -5,6 +5,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.jsav.chat.access.AccessPolicy;
+import com.jsav.chat.channel.Channel;
+import com.jsav.chat.channel.ChannelKind;
+import com.jsav.chat.channel.ChannelMemberRepository;
+import com.jsav.chat.channel.ChannelRepository;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
 import com.jsav.chat.server.ServerDtos.ServerResponse;
 import java.util.List;
@@ -20,6 +25,9 @@ class ServerServiceTest {
 
   @Mock ServerRepository servers;
   @Mock ServerMemberRepository members;
+  @Mock ChannelRepository channels;
+  @Mock ChannelMemberRepository channelMembers;
+  @Mock AccessPolicy policy;
   @InjectMocks ServerService service;
 
   @Test
@@ -34,6 +42,18 @@ class ServerServiceTest {
     verify(members).save(member.capture());
     assertThat(member.getValue().getRole()).isEqualTo("owner");
     assertThat(member.getValue().getId().getUserId()).isEqualTo(7L);
+  }
+
+  @Test
+  void create_alsoCreatesGeneralTextChannel() {
+    when(servers.save(any())).thenAnswer(i -> i.getArgument(0));
+
+    service.create(7L, new CreateServerRequest("Mi servidor"));
+
+    ArgumentCaptor<Channel> channel = ArgumentCaptor.forClass(Channel.class);
+    verify(channels).save(channel.capture());
+    assertThat(channel.getValue().getName()).isEqualTo("general");
+    assertThat(channel.getValue().kind()).isEqualTo(ChannelKind.TEXT);
   }
 
   @Test

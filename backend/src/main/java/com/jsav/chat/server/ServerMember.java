@@ -28,4 +28,12 @@ public class ServerMember {
   public String getRole() {
     return role;
   }
+
+  public Role role() {
+    return Role.fromDb(role);
+  }
+
+  public void setRole(Role role) {
+    this.role = role.dbValue();
+  }
 }

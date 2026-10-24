@@ -1,14 +1,20 @@
 package com.jsav.chat.server;
 
+import com.jsav.chat.server.ServerDtos.ChangeRoleRequest;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
+import com.jsav.chat.server.ServerDtos.MemberResponse;
+import com.jsav.chat.server.ServerDtos.ServerDetailResponse;
 import com.jsav.chat.server.ServerDtos.ServerResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -34,5 +40,31 @@ public class ServerController {
   @GetMapping
   List<ServerResponse> listMine(@AuthenticationPrincipal Jwt jwt) {
     return service.listMine(Long.valueOf(jwt.getSubject()));
+  }
+
+  @GetMapping("/{serverId}")
+  ServerDetailResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable Long serverId) {
+    return service.get(Long.valueOf(jwt.getSubject()), serverId);
+  }
+
+  @GetMapping("/{serverId}/members")
+  List<MemberResponse> listMembers(@AuthenticationPrincipal Jwt jwt, @PathVariable Long serverId) {
+    return service.listMembers(Long.valueOf(jwt.getSubject()), serverId);
+  }
+
+  @PutMapping("/{serverId}/members/{userId}/role")
+  MemberResponse changeRole(
+      @AuthenticationPrincipal Jwt jwt,
+      @PathVariable Long serverId,
+      @PathVariable Long userId,
+      @Valid @RequestBody ChangeRoleRequest req) {
+    return service.changeRole(Long.valueOf(jwt.getSubject()), serverId, userId, req);
+  }
+
+  @DeleteMapping("/{serverId}/members/{userId}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  void kick(
+      @AuthenticationPrincipal Jwt jwt, @PathVariable Long serverId, @PathVariable Long userId) {
+    service.kick(Long.valueOf(jwt.getSubject()), serverId, userId);
   }
 }
