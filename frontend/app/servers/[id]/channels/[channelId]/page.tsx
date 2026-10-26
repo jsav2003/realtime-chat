@@ -95,6 +95,7 @@ export default function ChannelPage() {
     const body = draft.trim();
     if (!body || sending) return;
     const key = failedKey ?? crypto.randomUUID();
+    const known = lastSeqOf(messages);
     setSending(true);
     try {
       const sent = await sendWithRetry(channelId, key, body);
@@ -102,6 +103,9 @@ export default function ChannelPage() {
       setDraft("");
       setFailedKey(null);
       setError(null);
+      // Hueco: esperaba known + 1 y llegó algo mayor, así que otros escribieron entre medio.
+      // Se pide lo que falta en vez de mostrar el canal incompleto.
+      if (sent.seq > known + 1) void resync(known);
     } catch (err) {
       setFailedKey(key);
       setError(
