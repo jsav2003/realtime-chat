@@ -42,6 +42,24 @@ export type Invite = {
 
 export type InvitePreview = { code: string; serverName: string };
 
+export type Message = {
+  id: number;
+  channelId: number;
+  /** Posición del mensaje en su canal: 1, 2, 3… sin huecos. Define el orden. */
+  seq: number;
+  authorId: number;
+  authorName: string;
+  clientMsgId: string;
+  body: string;
+  createdAt: string;
+};
+
+/** Siempre en orden ascendente de seq. */
+export type MessagePage = { messages: Message[]; hasMore: boolean };
+
+/** Uno de los dos cursores, o ninguno para pedir los últimos. */
+export type MessageCursor = { afterSeq?: number; beforeSeq?: number; limit?: number };
+
 export const getToken = () =>
   typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
 
@@ -107,6 +125,24 @@ export const api = {
     }),
   createInvite: (serverId: number) =>
     request<Invite>(`/servers/${serverId}/invites`, { method: "POST", body: "{}" }),
+  getChannel: (channelId: number) => request<Channel>(`/channels/${channelId}`),
+  /**
+   * El mismo clientMsgId en cada reintento: el backend lo reconoce y devuelve el mensaje ya
+   * guardado (200) en vez de crear otro (201).
+   */
+  sendMessage: (channelId: number, clientMsgId: string, body: string) =>
+    request<Message>(`/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ clientMsgId, body }),
+    }),
+  listMessages: (channelId: number, cursor: MessageCursor = {}) => {
+    const q = new URLSearchParams();
+    if (cursor.afterSeq !== undefined) q.set("after_seq", String(cursor.afterSeq));
+    if (cursor.beforeSeq !== undefined) q.set("before_seq", String(cursor.beforeSeq));
+    if (cursor.limit !== undefined) q.set("limit", String(cursor.limit));
+    const qs = q.toString();
+    return request<MessagePage>(`/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+  },
   previewInvite: (code: string) =>
     request<InvitePreview>(`/invites/${encodeURIComponent(code)}`),
   acceptInvite: (code: string) =>
