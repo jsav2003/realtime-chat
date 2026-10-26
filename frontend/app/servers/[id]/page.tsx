@@ -98,7 +98,8 @@ export default function ServerPage() {
       <ul>
         {channels.map((c) => (
           <li key={c.id}>
-            # {c.name} {c.kind === "private" && <small>(privado)</small>}
+            <Link href={`/servers/${serverId}/channels/${c.id}`}># {c.name}</Link>{" "}
+            {c.kind === "private" && <small>(privado)</small>}
           </li>
         ))}
       </ul>
