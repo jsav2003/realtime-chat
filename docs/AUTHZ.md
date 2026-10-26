@@ -1,6 +1,6 @@
 # Matriz de autorización
 
-Hito 2 para HTTP; los destinos STOMP se agregan en el hito 4 (DESIGN.md §8.2).
+HTTP desde el hito 2 (mensajes en el hito 3); los destinos STOMP se agregan en el hito 4 (DESIGN.md §8.2).
 
 ## Cómo se decide
 
@@ -18,7 +18,8 @@ aunque su token siga vigente.
 ### Roles
 
 - **member:** ve el servidor, sus miembros y los canales públicos. En un privado solo
-  entra si está en `channel_members`.
+  entra si está en `channel_members`. Lee y escribe mensajes en todo canal que ve: no
+  hay canales de solo lectura.
 - **admin:** además crea canales e invitaciones, administra los miembros de un privado,
   expulsa members y ve todos los privados.
 - **owner:** además cambia roles. Es intocable: nadie lo expulsa ni le cambia el rol.
@@ -64,6 +65,12 @@ válido.
 | `POST /channels/{channelId}/members` | privado, member sí está | 204 | 204 | 403 | 404 | 401 | 404 |
 | `DELETE /channels/{channelId}/members/{userId}` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
 | `DELETE /channels/{channelId}/members/{userId}` | privado, member sí está | 204 | 204 | 403 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/messages` | público | 201 | 201 | 201 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/messages` | privado, member no está | 201 | 201 | 404 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/messages` | privado, member sí está | 201 | 201 | 201 | 404 | 401 | 404 |
+| `GET /channels/{channelId}/messages` | público | 200 | 200 | 200 | 404 | 401 | 404 |
+| `GET /channels/{channelId}/messages` | privado, member no está | 200 | 200 | 404 | 404 | 401 | 404 |
+| `GET /channels/{channelId}/messages` | privado, member sí está | 200 | 200 | 200 | 404 | 401 | 404 |
 | `POST /servers/{serverId}/invites` | — | 201 | 201 | 403 | 404 | 401 | 404 |
 | `GET /invites/{code}` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
 | `POST /invites/{code}/accept` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
