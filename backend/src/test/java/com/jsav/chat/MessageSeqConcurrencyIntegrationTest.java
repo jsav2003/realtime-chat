@@ -155,4 +155,26 @@ class MessageSeqConcurrencyIntegrationTest {
         service.send(author.getId(), channel, new SendMessageRequest(UUID.randomUUID(), "x"));
     assertThat(next.message().seq()).isEqualTo(2);
   }
+
+  /** Lo nuevo y los reintentos mezclados: 25 mensajes, cada uno enviado dos veces a la vez. */
+  @Test
+  void mixedNewMessagesAndRetries_keepTheSequenceDense() throws Exception {
+    List<Callable<Sent>> sends = new ArrayList<>();
+    for (int i = 0; i < 25; i++) {
+      User author = authors.get(i % AUTHORS);
+      SendMessageRequest req = new SendMessageRequest(UUID.randomUUID(), "m" + i);
+      sends.add(() -> service.send(author.getId(), channel, req));
+      sends.add(() -> service.send(author.getId(), channel, req));
+    }
+
+    List<Sent> results = allAtOnce(sends);
+
+    assertThat(results).filteredOn(s -> !s.replayed()).hasSize(25);
+    // Las dos copias de cada mensaje recibieron el mismo seq.
+    for (int i = 0; i < results.size(); i += 2) {
+      assertThat(results.get(i).message()).isEqualTo(results.get(i + 1).message());
+    }
+    assertThat(storedSeqs()).isEqualTo(oneTo(25));
+    assertThat(lastSeq()).isEqualTo(25);
+  }
 }
