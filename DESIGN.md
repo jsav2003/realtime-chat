@@ -85,6 +85,9 @@ coinciden, y ordenar por ellos es la causa del tercer caso de la tabla.
 **Idempotencia del envío.** El cliente genera un `client_msg_id` único por mensaje y lo
 manda en cada reintento. Con `UNIQUE (author_id, client_msg_id)`, un reintento devuelve el
 mensaje ya guardado en vez de crear otro. Resuelve el segundo caso.
+Si dos reintentos del mismo mensaje llegan a la vez, el que pierde la carrera ya reservó un
+`seq`; su transacción se revierte para devolverlo, y así la secuencia nunca queda con
+huecos (ADR 0005). Reusar la clave en otro canal es un error del cliente: 409.
 
 **Broker externo para varias instancias.** El WebSocket usa STOMP con el relay de Spring
 hacia RabbitMQ (`enableStompBrokerRelay`), no el broker simple en memoria. Cualquier

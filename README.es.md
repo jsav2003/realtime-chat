@@ -14,25 +14,26 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 2 de 9.** La autorización por HTTP está construida y verificada; la
-> garantía de entrega en tiempo real está diseñada pero **todavía no implementada**
-> (hito 4). Nada de lo que sigue afirma un resultado que no exista.
+> **Estado: hito 3 de 9.** La autorización por HTTP y el orden de los mensajes en la base de
+> datos están construidos y verificados; la entrega en tiempo real (WebSocket, dos
+> instancias) está diseñada pero **todavía no implementada** (hito 4). Nada de lo que sigue
+> afirma un resultado que no exista.
 
 ## Estado
 
 | Hito | Qué | Estado |
 |---|---|---|
 | 1 | Auth (bcrypt + JWT), usuarios, servidores, Flyway | hecho |
-| 2 | Canales, invitaciones, roles, `AccessPolicy`, matriz de autorización HTTP | **hecho** |
-| 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | siguiente |
-| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | planeado |
+| 2 | Canales, invitaciones, roles, `AccessPolicy`, matriz de autorización HTTP | hecho |
+| 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | **hecho** |
+| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | siguiente |
 | 5 | Presencia y rate limiting | planeado |
 | 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | planeado |
 | 7 | Adjuntos (URLs prefirmadas de S3) | planeado |
 | 8 | Búsqueda y no leídos | planeado |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hito 2)
+## Lo que ya está demostrado (hitos 2 y 3)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -41,7 +42,7 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   miembro recibe 404 en un canal privado, para que la respuesta no confirme que existe.
 - **Una matriz de autorización como tests:** cada endpoint × 6 tipos de usuario (owner,
   admin, member, miembro de otro servidor, sin sesión, expulsado hace un segundo), un test
-  por celda, 108 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
+  por celda, 144 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
   que no está en la matriz, y otro si [`docs/AUTHZ.md`](docs/AUTHZ.md) se desvía de ella.
   Rompí un permiso a propósito y agregué un endpoint sin fila para comprobar que la matriz
   lo nota; lo notó.
@@ -49,8 +50,18 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   gasta un uso con un solo `UPDATE … WHERE uses < max_uses` atómico. Con `max_uses = 1`,
   diez aceptaciones simultáneas dejan entrar exactamente a una (también probado con
   límite 3).
+- **`seq` por canal sin repetidos ni huecos.** 50 envíos simultáneos a un canal reciben los
+  `seq` 1 a 50. Cambiar el `UPDATE … RETURNING` atómico por un `SELECT max(seq) + 1`
+  ingenuo hace fallar el test con `seq` repetidos.
+- **Los reintentos no duplican ni dejan huecos.** Diez reintentos simultáneos de un mismo
+  mensaje (mismo `client_msg_id`) lo guardan una vez y dejan `last_seq = 1`: los que pierden
+  la carrera revierten el `seq` que reservaron ([ADR 0005](docs/adr/0005-envio-idempotente-sin-huecos.md)).
+  Sin ese rollback el test termina con `last_seq = 10`.
+- **Paginación por cursor sobre `seq`:** `after_seq` para ponerse al día y `before_seq` para
+  el historial. La página del canal usa los dos, y se resincroniza sola cuando un mensaje
+  enviado revela un hueco.
 
-168 tests en total (unitarios, `@WebMvcTest`, integración con Testcontainers), formateados
+242 tests en total (unitarios, `@WebMvcTest`, integración con Testcontainers), formateados
 con Spotless.
 
 ## El diseño en 30 segundos
@@ -91,7 +102,7 @@ instancia llegan en los hitos 4 a 6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | El diseño, escrito antes del código: problemas, decisiones, plan de verificación, hitos |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y la matriz HTTP completa (la verifica un test) |
-| [`docs/adr/`](docs/adr) | Cuatro decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox |
+| [`docs/adr/`](docs/adr) | Cinco decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | El arnés de entrega y sus resultados (vacío hasta el hito 4) |
 | [`docs/v2.md`](docs/v2.md) | Ideas que quedaron fuera a propósito (bans, revocar invitaciones…) |
 

@@ -14,25 +14,25 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 2 of 9.** Authorization over HTTP is built and verified; the real-time
-> delivery guarantee is designed but **not implemented yet** (milestone 4). Nothing below
-> claims a result that does not exist.
+> **Status: milestone 3 of 9.** Authorization over HTTP and message ordering in the database
+> are built and verified; real-time delivery (WebSocket, two instances) is designed but **not
+> implemented yet** (milestone 4). Nothing below claims a result that does not exist.
 
 ## Status
 
 | Milestone | What | State |
 |---|---|---|
 | 1 | Auth (bcrypt + JWT), users, servers, Flyway | done |
-| 2 | Channels, invite links, roles, `AccessPolicy`, HTTP authorization matrix | **done** |
-| 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | next |
-| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | planned |
+| 2 | Channels, invite links, roles, `AccessPolicy`, HTTP authorization matrix | done |
+| 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | **done** |
+| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | next |
 | 5 | Presence and rate limiting | planned |
 | 6 | Mentions: outbox, worker, retries, dead-letter queue | planned |
 | 7 | Attachments (presigned S3 URLs) | planned |
 | 8 | Search and unread counts | planned |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestone 2)
+## What is already proven (milestones 2 and 3)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -41,15 +41,24 @@ tested on purpose**, not just claimed:
   non-member gets 404 on a private channel, so the response doesn't confirm it exists.
 - **An authorization matrix as tests:** every endpoint × 6 kinds of user (owner, admin,
   member, member of another server, unauthenticated, kicked a second ago), one test per
-  cell, 108 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
+  cell, 144 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
   not in the matrix, and another fails if [`docs/AUTHZ.md`](docs/AUTHZ.md) drifts from it.
   I broke a permission on purpose and added an unlisted endpoint to check the matrix
   notices; it did.
 - **Invite usage limits survive concurrency.** Accepting an invite spends a use with one
   atomic `UPDATE … WHERE uses < max_uses`. With `max_uses = 1`, ten simultaneous accepts let
   exactly one in (also tested with a limit of 3).
+- **Per-channel `seq` with no repeats and no gaps.** 50 simultaneous sends to one channel get
+  `seq` 1 to 50. Swapping the atomic `UPDATE … RETURNING` for a naive `SELECT max(seq) + 1`
+  makes the test fail with duplicate `seq` values.
+- **Retries never duplicate and never leave a gap.** Ten simultaneous retries of one message
+  (same `client_msg_id`) store it once and leave `last_seq = 1`: the retries that lose the
+  race roll back the `seq` they reserved ([ADR 0005](docs/adr/0005-envio-idempotente-sin-huecos.md)).
+  Without that rollback the test ends at `last_seq = 10`.
+- **Cursor pagination by `seq`:** `after_seq` to catch up, `before_seq` for history. The
+  channel page uses both, and resyncs on its own when a sent message reveals a gap.
 
-168 tests in total (unit, `@WebMvcTest`, Testcontainers integration), Spotless-formatted.
+242 tests in total (unit, `@WebMvcTest`, Testcontainers integration), Spotless-formatted.
 
 ## The design in 30 seconds
 
@@ -88,7 +97,7 @@ instance arrive in milestones 4–6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The design, written before the code: problems, decisions, verification plan, milestones |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP matrix (checked by a test) |
-| [`docs/adr/`](docs/adr) | Four decision records: per-channel `seq`, external broker, publish after commit, outbox |
+| [`docs/adr/`](docs/adr) | Five decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery harness and its results (placeholder until milestone 4) |
 | [`docs/v2.md`](docs/v2.md) | Ideas left out on purpose (bans, invite revocation…) |
 

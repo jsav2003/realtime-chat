@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -132,6 +133,9 @@ class AuthorizationMatrixTest {
   private static final Map<String, Ref> NONE = Map.of();
   private static final Map<String, Ref> SERVER = Map.of("serverId", Ref.SERVER);
   private static final String JSON_OBJ = "{}";
+
+  /** Cada envío lleva su propia clave para que ninguno cuente como reintento de otro. */
+  private static final String MESSAGE_BODY_TEMPLATE = "{\"clientMsgId\":\"%s\",\"body\":\"hola\"}";
 
   static final List<Row> MATRIX =
       List.of(
@@ -292,6 +296,79 @@ class AuthorizationMatrixTest {
               204,
               204,
               403,
+              404,
+              401,
+              404),
+          // ---- mensajes (hito 3): escribe y lee quien ve el canal ----
+          row(
+              "POST",
+              "/channels/{channelId}/messages",
+              "público",
+              Map.of("channelId", Ref.GENERAL),
+              w -> MESSAGE_BODY_TEMPLATE.formatted(UUID.randomUUID()),
+              201,
+              201,
+              201,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/messages",
+              "privado, member no está",
+              Map.of("channelId", Ref.PRIVATE),
+              w -> MESSAGE_BODY_TEMPLATE.formatted(UUID.randomUUID()),
+              201,
+              201,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/messages",
+              "privado, member sí está",
+              Map.of("channelId", Ref.PRIVATE_IN),
+              w -> MESSAGE_BODY_TEMPLATE.formatted(UUID.randomUUID()),
+              201,
+              201,
+              201,
+              404,
+              401,
+              404),
+          row(
+              "GET",
+              "/channels/{channelId}/messages",
+              "público",
+              Map.of("channelId", Ref.GENERAL),
+              null,
+              200,
+              200,
+              200,
+              404,
+              401,
+              404),
+          row(
+              "GET",
+              "/channels/{channelId}/messages",
+              "privado, member no está",
+              Map.of("channelId", Ref.PRIVATE),
+              null,
+              200,
+              200,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "GET",
+              "/channels/{channelId}/messages",
+              "privado, member sí está",
+              Map.of("channelId", Ref.PRIVATE_IN),
+              null,
+              200,
+              200,
+              200,
               404,
               401,
               404),

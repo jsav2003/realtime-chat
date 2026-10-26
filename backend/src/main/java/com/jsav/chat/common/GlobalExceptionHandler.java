@@ -21,6 +21,11 @@ public class GlobalExceptionHandler {
         .body(new ApiError(400, "validation_failed", "Datos inválidos", fields));
   }
 
+  @ExceptionHandler(BadRequestException.class)
+  ResponseEntity<ApiError> badRequest(BadRequestException e) {
+    return build(HttpStatus.BAD_REQUEST, "bad_request", e.getMessage());
+  }
+
   @ExceptionHandler(UnauthorizedException.class)
   ResponseEntity<ApiError> unauthorized(UnauthorizedException e) {
     return build(HttpStatus.UNAUTHORIZED, "unauthorized", e.getMessage());
