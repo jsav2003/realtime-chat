@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
-import { mergeBySeq, sendWithRetry } from "@/lib/messages";
+import { lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -25,6 +25,7 @@ export default function ChannelPage() {
    * el intento anterior sí alcanzó a guardarse; si cambia el texto, es otro mensaje y otra clave.
    */
   const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -62,6 +63,30 @@ export default function ChannelPage() {
       setError("No se pudieron cargar los mensajes anteriores");
     } finally {
       setLoadingOlder(false);
+    }
+  }
+
+  /**
+   * Resincronización (DESIGN.md §3.2): pide todo lo posterior al último seq que se tiene, página
+   * por página. Hasta el hito 4 es la única forma de ver lo que escribieron los demás.
+   */
+  async function resync(afterSeq: number) {
+    setSyncing(true);
+    try {
+      const fetched: Message[] = [];
+      let after = afterSeq;
+      for (;;) {
+        const page = await api.listMessages(channelId, { afterSeq: after });
+        fetched.push(...page.messages);
+        if (!page.hasMore || page.messages.length === 0) break;
+        after = lastSeqOf(page.messages);
+      }
+      setMessages((prev) => mergeBySeq(prev, fetched));
+      setError(null);
+    } catch {
+      setError("No se pudieron buscar mensajes nuevos");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -126,6 +151,15 @@ export default function ChannelPage() {
           </li>
         ))}
       </ol>
+
+      <p>
+        <button
+          onClick={() => resync(lastSeqOf(messages))}
+          disabled={!channel || syncing}
+        >
+          {syncing ? "Buscando…" : "Buscar nuevos"}
+        </button>
+      </p>
 
       <form onSubmit={onSend} style={{ display: "flex", gap: "0.5rem" }}>
         <input
