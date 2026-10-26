@@ -3,6 +3,7 @@ package com.jsav.chat.message;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -83,6 +84,46 @@ public class MessageRepository {
         .param("clientMsgId", clientMsgId)
         .query(MessageRepository::map)
         .optional();
+  }
+
+  /**
+   * Hasta {@code limit} mensajes con {@code seq > afterSeq}, en orden ascendente. Es la
+   * resincronización: el cliente pide lo que vino después del último seq que vio.
+   */
+  public List<Message> findAfter(Long channelId, long afterSeq, int limit) {
+    return jdbc.sql(
+            """
+            select %s from messages m join users u on u.id = m.author_id
+            where m.channel_id = :channelId and m.seq > :afterSeq
+            order by m.seq
+            limit :limit
+            """
+                .formatted(COLUMNS))
+        .param("channelId", channelId)
+        .param("afterSeq", afterSeq)
+        .param("limit", limit)
+        .query(MessageRepository::map)
+        .list();
+  }
+
+  /**
+   * Hasta {@code limit} mensajes con {@code seq < beforeSeq}, los más recientes primero. Es el
+   * historial hacia atrás; con {@code Long.MAX_VALUE} da los últimos del canal.
+   */
+  public List<Message> findBefore(Long channelId, long beforeSeq, int limit) {
+    return jdbc.sql(
+            """
+            select %s from messages m join users u on u.id = m.author_id
+            where m.channel_id = :channelId and m.seq < :beforeSeq
+            order by m.seq desc
+            limit :limit
+            """
+                .formatted(COLUMNS))
+        .param("channelId", channelId)
+        .param("beforeSeq", beforeSeq)
+        .param("limit", limit)
+        .query(MessageRepository::map)
+        .list();
   }
 
   static Message map(ResultSet rs, int row) throws SQLException {

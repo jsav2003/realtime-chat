@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public final class MessageDtos {
@@ -39,4 +40,10 @@ public final class MessageDtos {
           m.createdAt());
     }
   }
+
+  /**
+   * Una página de mensajes, siempre en orden ascendente de {@code seq}. {@code hasMore} dice si hay
+   * más en la dirección pedida: más nuevos con {@code after_seq}, más viejos en los demás casos.
+   */
+  public record MessagePage(List<MessageResponse> messages, boolean hasMore) {}
 }
