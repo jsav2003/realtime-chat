@@ -241,4 +241,21 @@ class AccessPolicyTest {
     assertThatThrownBy(() -> policy.requireChannel(OUTSIDER, 300L, ChannelAction.READ))
         .isInstanceOf(NotFoundException.class);
   }
+
+  @Test
+  void requireChannel_writeFollowsVisibility_anyRoleThatSeesCanWrite() {
+    roster();
+    channel(100L, ChannelKind.TEXT);
+    channel(200L, ChannelKind.PRIVATE);
+    when(channelMembers.existsById(new ChannelMemberId(200L, MEMBER))).thenReturn(false);
+
+    assertThat(policy.requireChannel(MEMBER, 100L, ChannelAction.WRITE).role())
+        .isEqualTo(Role.MEMBER);
+    assertThat(policy.requireChannel(ADMIN, 200L, ChannelAction.WRITE)).isNotNull();
+    // No lo ve: 404, igual que al leer.
+    assertThatThrownBy(() -> policy.requireChannel(MEMBER, 200L, ChannelAction.WRITE))
+        .isInstanceOf(NotFoundException.class);
+    assertThatThrownBy(() -> policy.requireChannel(OUTSIDER, 100L, ChannelAction.WRITE))
+        .isInstanceOf(NotFoundException.class);
+  }
 }
