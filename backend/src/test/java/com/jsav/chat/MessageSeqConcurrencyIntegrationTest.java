@@ -125,4 +125,34 @@ class MessageSeqConcurrencyIntegrationTest {
     assertThat(storedSeqs()).isEqualTo(oneTo(50));
     assertThat(lastSeq()).isEqualTo(50);
   }
+
+  /**
+   * El caso delicado del envío: los diez pasan la búsqueda de la clave antes de que el primero
+   * confirme, así que los diez reservan un seq. Nueve chocan en el INSERT y deben revertir su
+   * reserva; si no, el canal quedaría con last_seq = 10 y nueve huecos.
+   */
+  @Test
+  void tenSimultaneousRetriesOfOneMessage_storeItOnce_andLeaveNoSeqGap() throws Exception {
+    User author = authors.get(1);
+    SendMessageRequest req = new SendMessageRequest(UUID.randomUUID(), "una sola vez");
+    List<Callable<Sent>> retries = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      retries.add(() -> service.send(author.getId(), channel, req));
+    }
+
+    List<Sent> results = allAtOnce(retries);
+
+    assertThat(results).filteredOn(s -> !s.replayed()).hasSize(1);
+    assertThat(results)
+        .extracting(s -> s.message().id())
+        .containsOnly(results.get(0).message().id());
+    assertThat(results).extracting(s -> s.message().seq()).containsOnly(1L);
+    assertThat(storedSeqs()).containsExactly(1L);
+    assertThat(lastSeq()).isEqualTo(1);
+
+    // El siguiente mensaje del canal es el 2: ningún reintento se quedó con un número.
+    Sent next =
+        service.send(author.getId(), channel, new SendMessageRequest(UUID.randomUUID(), "x"));
+    assertThat(next.message().seq()).isEqualTo(2);
+  }
 }
