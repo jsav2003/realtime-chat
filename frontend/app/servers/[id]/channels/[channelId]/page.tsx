@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
-import { mergeBySeq } from "@/lib/messages";
+import { mergeBySeq, sendWithRetry } from "@/lib/messages";
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -18,6 +18,13 @@ export default function ChannelPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  /**
+   * Clave del envío que falló. Si el usuario vuelve a enviar el mismo texto se reutiliza, por si
+   * el intento anterior sí alcanzó a guardarse; si cambia el texto, es otro mensaje y otra clave.
+   */
+  const [failedKey, setFailedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -58,6 +65,30 @@ export default function ChannelPage() {
     }
   }
 
+  async function onSend(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body || sending) return;
+    const key = failedKey ?? crypto.randomUUID();
+    setSending(true);
+    try {
+      const sent = await sendWithRetry(channelId, key, body);
+      setMessages((prev) => mergeBySeq(prev, [sent]));
+      setDraft("");
+      setFailedKey(null);
+      setError(null);
+    } catch (err) {
+      setFailedKey(key);
+      setError(
+        err instanceof ApiError && err.body.status < 500
+          ? err.body.message
+          : "No se pudo enviar. Vuelve a intentarlo: no se duplicará.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
   if (notFound) {
     return (
       <main style={{ maxWidth: 640, margin: "3rem auto", padding: "0 1rem" }}>
@@ -95,6 +126,23 @@ export default function ChannelPage() {
           </li>
         ))}
       </ol>
+
+      <form onSubmit={onSend} style={{ display: "flex", gap: "0.5rem" }}>
+        <input
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setFailedKey(null);
+          }}
+          placeholder={`Escribe en #${channel?.name ?? ""}`}
+          maxLength={4000}
+          disabled={!channel}
+          style={{ flex: 1 }}
+        />
+        <button type="submit" disabled={!channel || sending || !draft.trim()}>
+          {sending ? "Enviando…" : "Enviar"}
+        </button>
+      </form>
     </main>
   );
 }
