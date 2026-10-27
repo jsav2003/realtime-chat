@@ -132,9 +132,19 @@ export default function ChannelPage() {
       // recibiendo y quedaría un hueco entre este pedido y lo vivo.
       onSubscribed: () => void resync(lastSeqOf(messagesRef.current)),
       onState: setConnection,
-      onRejected: () => {},
+      // El servidor ya no deja suscribirse. 401: el token venció. 404: el canal ya no se ve,
+      // por ejemplo porque expulsaron al usuario (se le cerró el socket y al reconectar se
+      // le negó la suscripción). Reintentar no cambiaría nada.
+      onRejected: (status) => {
+        if (status === 401) {
+          clearToken();
+          router.replace("/login");
+        } else {
+          setNotFound(true);
+        }
+      },
     });
-  }, [channel, channelId, addMessages, resync]);
+  }, [channel, channelId, addMessages, resync, router]);
 
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
