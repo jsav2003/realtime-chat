@@ -11,7 +11,7 @@ import org.testcontainers.utility.DockerImageName;
 
 /** Redis se agrega cuando llegue su hito (presencia y rate limiting). */
 @TestConfiguration(proxyBeanMethods = false)
-class TestcontainersConfiguration {
+public class TestcontainersConfiguration {
 
   static final int STOMP_PORT = 61613;
 

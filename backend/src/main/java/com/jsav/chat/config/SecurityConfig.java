@@ -35,6 +35,9 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers("/actuator/health")
                     .permitAll()
+                    // El handshake va sin token: el JWT se valida en el frame CONNECT de STOMP.
+                    .requestMatchers("/ws/**")
+                    .permitAll()
                     .anyRequest()
                     .authenticated())
         .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
