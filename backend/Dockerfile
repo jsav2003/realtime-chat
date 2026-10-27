@@ -8,6 +8,8 @@ COPY src src
 RUN ./mvnw -q -B package -DskipTests
 
 FROM eclipse-temurin:21-jre
+# curl solo para el healthcheck de docker-compose.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/target/chat-*.jar app.jar
 EXPOSE 8080
