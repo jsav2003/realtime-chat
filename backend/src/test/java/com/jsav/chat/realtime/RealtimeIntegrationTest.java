@@ -4,6 +4,7 @@ import com.jsav.chat.TestcontainersConfiguration;
 import com.jsav.chat.auth.JwtService;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
 import com.jsav.chat.channel.ChannelService;
+import com.jsav.chat.message.MessageDtos.SendMessageRequest;
 import com.jsav.chat.message.MessageService;
 import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
@@ -12,6 +13,7 @@ import com.jsav.chat.server.ServerMemberRepository;
 import com.jsav.chat.server.ServerService;
 import com.jsav.chat.user.User;
 import com.jsav.chat.user.UserRepository;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +63,10 @@ abstract class RealtimeIntegrationTest {
         channelService
             .create(owner.getId(), serverId, new CreateChannelRequest("secreto", "private"))
             .id();
+  }
+
+  MessageService.Sent send(User user, Long channelId, String body) {
+    return messages.send(user.getId(), channelId, new SendMessageRequest(UUID.randomUUID(), body));
   }
 
   String token(User user) {
