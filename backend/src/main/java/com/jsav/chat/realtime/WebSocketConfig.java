@@ -2,6 +2,7 @@ package com.jsav.chat.realtime;
 
 import com.jsav.chat.config.RealtimeProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
@@ -20,14 +21,22 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
   public static final String TOPIC_PREFIX = "/topic";
 
   private final RealtimeProperties props;
+  private final StompSecurityInterceptor security;
 
-  public WebSocketConfig(RealtimeProperties props) {
+  public WebSocketConfig(RealtimeProperties props, StompSecurityInterceptor security) {
     this.props = props;
+    this.security = security;
   }
 
   @Override
   public void registerStompEndpoints(StompEndpointRegistry registry) {
     registry.addEndpoint("/ws").setAllowedOrigins(props.allowedOrigins().toArray(String[]::new));
+    registry.setErrorHandler(new StompErrorHandler());
+  }
+
+  @Override
+  public void configureClientInboundChannel(ChannelRegistration registration) {
+    registration.interceptors(security);
   }
 
   @Override
