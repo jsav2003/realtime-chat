@@ -2,9 +2,18 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
 import { lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
+import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
+
+const CONNECTION_LABELS: Record<ConnectionState, string> = {
+  connecting: "Conectando…",
+  live: "● En vivo",
+  reconnecting:
+    "Sin conexión en vivo; reconectando… (puedes seguir usando «Buscar nuevos»)",
+  closed: "Sin conexión en vivo",
+};
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -26,6 +35,18 @@ export default function ChannelPage() {
    */
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  /**
+   * Los mensajes que se tienen, siempre al día. Los eventos del WebSocket llegan fuera del render
+   * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
+   */
+  const messagesRef = useRef<Message[]>([]);
+
+  /** Une mensajes a los que ya se tienen (descarta repetidos y ordena por seq). */
+  const addMessages = useCallback((incoming: Message[]) => {
+    messagesRef.current = mergeBySeq(messagesRef.current, incoming);
+    setMessages(messagesRef.current);
+  }, []);
 
   useEffect(() => {
     if (!getToken()) {
@@ -35,7 +56,7 @@ export default function ChannelPage() {
     Promise.all([api.getChannel(channelId), api.listMessages(channelId)])
       .then(([c, page]) => {
         setChannel(c);
-        setMessages(page.messages);
+        addMessages(page.messages);
         setHasOlder(page.hasMore);
       })
       .catch((err) => {
@@ -48,7 +69,7 @@ export default function ChannelPage() {
           setError("No se pudo cargar el canal");
         }
       });
-  }, [router, channelId]);
+  }, [router, channelId, addMessages]);
 
   /** Historial hacia atrás: lo anterior al primer seq que ya se tiene. */
   async function loadOlder() {
@@ -56,7 +77,7 @@ export default function ChannelPage() {
     setLoadingOlder(true);
     try {
       const page = await api.listMessages(channelId, { beforeSeq: messages[0].seq });
-      setMessages((prev) => mergeBySeq(prev, page.messages));
+      addMessages(page.messages);
       setHasOlder(page.hasMore);
       setError(null);
     } catch {
@@ -70,36 +91,71 @@ export default function ChannelPage() {
    * Resincronización (DESIGN.md §3.2): pide todo lo posterior al último seq que se tiene, página
    * por página. Hasta el hito 4 es la única forma de ver lo que escribieron los demás.
    */
-  async function resync(afterSeq: number) {
-    setSyncing(true);
-    try {
-      const fetched: Message[] = [];
-      let after = afterSeq;
-      for (;;) {
-        const page = await api.listMessages(channelId, { afterSeq: after });
-        fetched.push(...page.messages);
-        if (!page.hasMore || page.messages.length === 0) break;
-        after = lastSeqOf(page.messages);
+  const resync = useCallback(
+    async (afterSeq: number) => {
+      setSyncing(true);
+      try {
+        const fetched: Message[] = [];
+        let after = afterSeq;
+        for (;;) {
+          const page = await api.listMessages(channelId, { afterSeq: after });
+          fetched.push(...page.messages);
+          if (!page.hasMore || page.messages.length === 0) break;
+          after = lastSeqOf(page.messages);
+        }
+        addMessages(fetched);
+        setError(null);
+      } catch {
+        setError("No se pudieron buscar mensajes nuevos");
+      } finally {
+        setSyncing(false);
       }
-      setMessages((prev) => mergeBySeq(prev, fetched));
-      setError(null);
-    } catch {
-      setError("No se pudieron buscar mensajes nuevos");
-    } finally {
-      setSyncing(false);
-    }
-  }
+    },
+    [channelId, addMessages],
+  );
+
+  /**
+   * Tiempo real: el canal se abre solo después de cargar el canal (si no se puede ver, ya
+   * habrá fallado). Un mensaje en vivo se une por seq, así que uno repetido no hace nada, y si
+   * el seq salta, se pide lo que falta por HTTP (DESIGN.md §3.2).
+   */
+  useEffect(() => {
+    if (!channel) return;
+    return openChannelSocket(channelId, {
+      onMessage: (m) => {
+        const known = lastSeqOf(messagesRef.current);
+        addMessages([m]);
+        if (m.seq > known + 1) void resync(known);
+      },
+      // Primera vez y después de cada reconexión: pedir lo que se pudo perder mientras no se
+      // estaba suscrito. Se hace recién con el RECEIPT, porque antes no hay garantía de estar
+      // recibiendo y quedaría un hueco entre este pedido y lo vivo.
+      onSubscribed: () => void resync(lastSeqOf(messagesRef.current)),
+      onState: setConnection,
+      // El servidor ya no deja suscribirse. 401: el token venció. 404: el canal ya no se ve,
+      // por ejemplo porque expulsaron al usuario (se le cerró el socket y al reconectar se
+      // le negó la suscripción). Reintentar no cambiaría nada.
+      onRejected: (status) => {
+        if (status === 401) {
+          clearToken();
+          router.replace("/login");
+        } else {
+          setNotFound(true);
+        }
+      },
+    });
+  }, [channel, channelId, addMessages, resync, router]);
 
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const body = draft.trim();
     if (!body || sending) return;
     const key = failedKey ?? crypto.randomUUID();
-    const known = lastSeqOf(messages);
+    const known = lastSeqOf(messagesRef.current);
     setSending(true);
     try {
       const sent = await sendWithRetry(channelId, key, body);
-      setMessages((prev) => mergeBySeq(prev, [sent]));
+      addMessages([sent]);
       setDraft("");
       setFailedKey(null);
       setError(null);
@@ -136,6 +192,11 @@ export default function ChannelPage() {
         # {channel?.name ?? "Cargando…"}{" "}
         {channel?.kind === "private" && <small>(privado)</small>}
       </h1>
+      <p aria-live="polite" style={{ margin: 0, opacity: 0.7 }}>
+        <small data-testid="connection-status" data-state={connection}>
+          {CONNECTION_LABELS[connection]}
+        </small>
+      </p>
       {error && <p role="alert">{error}</p>}
 
       {hasOlder && (
