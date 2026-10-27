@@ -8,6 +8,10 @@ import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
 import com.jsav.chat.server.ServerMember;
 import com.jsav.chat.user.User;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -197,6 +201,52 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
         .as("el destino de suscripción real debe estar en la matriz, y SEND también")
         .contains("SUBSCRIBE " + CHANNEL_TOPIC, "SEND " + CHANNEL_TOPIC);
     assertThat(ChannelTopic.of(1)).matches(CHANNEL_TOPIC.replace("{channelId}", "1"));
+  }
+
+  // ---- docs/AUTHZ.md es la misma tabla ----
+
+  private static final String START = "<!-- stomp-matrix:start -->";
+  private static final String END = "<!-- stomp-matrix:end -->";
+  private static final Path DOC = Path.of("..", "docs", "AUTHZ.md");
+
+  @Test
+  void authzDocMatchesTheStompMatrix() throws IOException {
+    String doc = Files.readString(DOC, StandardCharsets.UTF_8).replace("\r\n", "\n");
+    int from = doc.indexOf(START);
+    int to = doc.indexOf(END);
+    assertThat(from).as("falta %s en docs/AUTHZ.md", START).isNotNegative();
+    assertThat(to).as("falta %s en docs/AUTHZ.md", END).isGreaterThan(from);
+
+    String generated = markdownTable();
+    if (System.getProperty("authz.update") != null) {
+      String updated =
+          doc.substring(0, from + START.length()) + "\n" + generated + "\n" + doc.substring(to);
+      Files.writeString(DOC, updated, StandardCharsets.UTF_8);
+      return;
+    }
+    String current = doc.substring(from + START.length(), to).trim();
+    assertThat(current)
+        .as(
+            "docs/AUTHZ.md desactualizado; regenerar con -Dauthz.update=true. Tabla esperada:\n%s",
+            generated)
+        .isEqualTo(generated.trim());
+  }
+
+  private static String markdownTable() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("| Comando y destino | Caso");
+    for (Actor a : Actor.values()) {
+      sb.append(" | ").append(a.label);
+    }
+    sb.append(" |\n|---|---");
+    sb.append("|---".repeat(Actor.values().length));
+    sb.append("|");
+    for (Row r : MATRIX) {
+      sb.append("\n| `").append(r.key()).append("` | ").append(r.note());
+      r.expected().forEach(code -> sb.append(" | ").append(code));
+      sb.append(" |");
+    }
+    return sb.toString();
   }
 
   private static final AtomicInteger WORLDS = new AtomicInteger();
