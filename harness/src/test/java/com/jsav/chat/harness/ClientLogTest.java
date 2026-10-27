@@ -59,6 +59,26 @@ class ClientLogTest {
   }
 
   @Test
+  void contiguousSeqStopsAtTheFirstHole() {
+    ClientLog log = new ClientLog();
+    for (long seq : new long[] {1, 2, 3, 5, 6, 9}) {
+      log.receive(msg(seq, UUID.randomUUID()), Source.LIVE);
+    }
+
+    // lastSeq() dice 9, pero resincronizar desde 9 dejaría el 4, el 7 y el 8 sin pedir nunca.
+    assertThat(log.lastSeq()).isEqualTo(9);
+    assertThat(log.contiguousSeq()).isEqualTo(3);
+  }
+
+  @Test
+  void contiguousSeqIsZeroUntilTheFirstMessageArrives() {
+    ClientLog log = new ClientLog();
+    log.receive(msg(2, UUID.randomUUID()), Source.LIVE);
+
+    assertThat(log.contiguousSeq()).isZero();
+  }
+
+  @Test
   void anEmptyLogHasLastSeqZero() {
     assertThat(new ClientLog().lastSeq()).isZero();
   }

@@ -45,9 +45,23 @@ public final class ClientLog {
     }
   }
 
-  /** El mayor seq que se tiene, o 0. Es el cursor que usa la resincronización. */
+  /** El mayor seq que se tiene, o 0. Ojo: puede haber huecos por debajo. */
   public long lastSeq() {
     return bySeq.isEmpty() ? 0 : bySeq.lastKey();
+  }
+
+  /**
+   * El final de la racha completa que empieza en el seq 1: el mayor n tal que se tienen 1..n. Es el
+   * cursor correcto para resincronizar. Pedir "lo posterior al mayor seq" dejaría un hueco para
+   * siempre si un mensaje en vivo llegó antes que los anteriores (por ejemplo, justo al
+   * reconectar).
+   */
+  public long contiguousSeq() {
+    long n = 0;
+    while (bySeq.containsKey(n + 1)) {
+      n++;
+    }
+    return n;
   }
 
   /** Los mensajes en orden de seq. */
