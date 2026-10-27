@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
 import { lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
+import { openChannelSocket } from "@/lib/realtime";
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -26,6 +27,19 @@ export default function ChannelPage() {
    */
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  /**
+   * Los mensajes que se tienen, siempre al día. Los eventos del WebSocket llegan fuera del render
+   * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
+   */
+  const messagesRef = useRef<Message[]>([]);
+  /** Ya se cargó el historial: antes de eso un seq "adelantado" no es un hueco. */
+  const loadedRef = useRef(false);
+
+  /** Une mensajes a los que ya se tienen (descarta repetidos y ordena por seq). */
+  const addMessages = useCallback((incoming: Message[]) => {
+    messagesRef.current = mergeBySeq(messagesRef.current, incoming);
+    setMessages(messagesRef.current);
+  }, []);
 
   useEffect(() => {
     if (!getToken()) {
@@ -35,7 +49,8 @@ export default function ChannelPage() {
     Promise.all([api.getChannel(channelId), api.listMessages(channelId)])
       .then(([c, page]) => {
         setChannel(c);
-        setMessages(page.messages);
+        addMessages(page.messages);
+        loadedRef.current = true;
         setHasOlder(page.hasMore);
       })
       .catch((err) => {
@@ -48,7 +63,7 @@ export default function ChannelPage() {
           setError("No se pudo cargar el canal");
         }
       });
-  }, [router, channelId]);
+  }, [router, channelId, addMessages]);
 
   /** Historial hacia atrás: lo anterior al primer seq que ya se tiene. */
   async function loadOlder() {
@@ -56,7 +71,7 @@ export default function ChannelPage() {
     setLoadingOlder(true);
     try {
       const page = await api.listMessages(channelId, { beforeSeq: messages[0].seq });
-      setMessages((prev) => mergeBySeq(prev, page.messages));
+      addMessages(page.messages);
       setHasOlder(page.hasMore);
       setError(null);
     } catch {
@@ -70,36 +85,58 @@ export default function ChannelPage() {
    * Resincronización (DESIGN.md §3.2): pide todo lo posterior al último seq que se tiene, página
    * por página. Hasta el hito 4 es la única forma de ver lo que escribieron los demás.
    */
-  async function resync(afterSeq: number) {
-    setSyncing(true);
-    try {
-      const fetched: Message[] = [];
-      let after = afterSeq;
-      for (;;) {
-        const page = await api.listMessages(channelId, { afterSeq: after });
-        fetched.push(...page.messages);
-        if (!page.hasMore || page.messages.length === 0) break;
-        after = lastSeqOf(page.messages);
+  const resync = useCallback(
+    async (afterSeq: number) => {
+      setSyncing(true);
+      try {
+        const fetched: Message[] = [];
+        let after = afterSeq;
+        for (;;) {
+          const page = await api.listMessages(channelId, { afterSeq: after });
+          fetched.push(...page.messages);
+          if (!page.hasMore || page.messages.length === 0) break;
+          after = lastSeqOf(page.messages);
+        }
+        addMessages(fetched);
+        setError(null);
+      } catch {
+        setError("No se pudieron buscar mensajes nuevos");
+      } finally {
+        setSyncing(false);
       }
-      setMessages((prev) => mergeBySeq(prev, fetched));
-      setError(null);
-    } catch {
-      setError("No se pudieron buscar mensajes nuevos");
-    } finally {
-      setSyncing(false);
-    }
-  }
+    },
+    [channelId, addMessages],
+  );
+
+  /**
+   * Tiempo real: el canal se abre solo después de cargar el canal (si no se puede ver, ya
+   * habrá fallado). Un mensaje en vivo se une por seq, así que uno repetido no hace nada, y si
+   * el seq salta, se pide lo que falta por HTTP (DESIGN.md §3.2).
+   */
+  useEffect(() => {
+    if (!channel) return;
+    return openChannelSocket(channelId, {
+      onMessage: (m) => {
+        const known = lastSeqOf(messagesRef.current);
+        addMessages([m]);
+        if (loadedRef.current && m.seq > known + 1) void resync(known);
+      },
+      onSubscribed: () => {},
+      onState: () => {},
+      onRejected: () => {},
+    });
+  }, [channel, channelId, addMessages, resync]);
 
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const body = draft.trim();
     if (!body || sending) return;
     const key = failedKey ?? crypto.randomUUID();
-    const known = lastSeqOf(messages);
+    const known = lastSeqOf(messagesRef.current);
     setSending(true);
     try {
       const sent = await sendWithRetry(channelId, key, body);
-      setMessages((prev) => mergeBySeq(prev, [sent]));
+      addMessages([sent]);
       setDraft("");
       setFailedKey(null);
       setError(null);
