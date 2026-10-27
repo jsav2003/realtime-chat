@@ -5,7 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
 import { lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
-import { openChannelSocket } from "@/lib/realtime";
+import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
+
+const CONNECTION_LABELS: Record<ConnectionState, string> = {
+  connecting: "Conectando…",
+  live: "● En vivo",
+  reconnecting:
+    "Sin conexión en vivo; reconectando… (puedes seguir usando «Buscar nuevos»)",
+  closed: "Sin conexión en vivo",
+};
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -27,6 +35,7 @@ export default function ChannelPage() {
    */
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
   /**
    * Los mensajes que se tienen, siempre al día. Los eventos del WebSocket llegan fuera del render
    * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
@@ -122,7 +131,7 @@ export default function ChannelPage() {
       // estaba suscrito. Se hace recién con el RECEIPT, porque antes no hay garantía de estar
       // recibiendo y quedaría un hueco entre este pedido y lo vivo.
       onSubscribed: () => void resync(lastSeqOf(messagesRef.current)),
-      onState: () => {},
+      onState: setConnection,
       onRejected: () => {},
     });
   }, [channel, channelId, addMessages, resync]);
@@ -173,6 +182,11 @@ export default function ChannelPage() {
         # {channel?.name ?? "Cargando…"}{" "}
         {channel?.kind === "private" && <small>(privado)</small>}
       </h1>
+      <p aria-live="polite" style={{ margin: 0, opacity: 0.7 }}>
+        <small data-testid="connection-status" data-state={connection}>
+          {CONNECTION_LABELS[connection]}
+        </small>
+      </p>
       {error && <p role="alert">{error}</p>}
 
       {hasOlder && (
