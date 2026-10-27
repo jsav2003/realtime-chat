@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
-import { lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
+import { contiguousSeqOf, lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
@@ -123,14 +123,14 @@ export default function ChannelPage() {
     if (!channel) return;
     return openChannelSocket(channelId, {
       onMessage: (m) => {
-        const known = lastSeqOf(messagesRef.current);
+        const known = contiguousSeqOf(messagesRef.current);
         addMessages([m]);
         if (m.seq > known + 1) void resync(known);
       },
       // Primera vez y después de cada reconexión: pedir lo que se pudo perder mientras no se
       // estaba suscrito. Se hace recién con el RECEIPT, porque antes no hay garantía de estar
       // recibiendo y quedaría un hueco entre este pedido y lo vivo.
-      onSubscribed: () => void resync(lastSeqOf(messagesRef.current)),
+      onSubscribed: () => void resync(contiguousSeqOf(messagesRef.current)),
       onState: setConnection,
       // El servidor ya no deja suscribirse. 401: el token venció. 404: el canal ya no se ve,
       // por ejemplo porque expulsaron al usuario (se le cerró el socket y al reconectar se
@@ -151,7 +151,7 @@ export default function ChannelPage() {
     const body = draft.trim();
     if (!body || sending) return;
     const key = failedKey ?? crypto.randomUUID();
-    const known = lastSeqOf(messagesRef.current);
+    const known = contiguousSeqOf(messagesRef.current);
     setSending(true);
     try {
       const sent = await sendWithRetry(channelId, key, body);
@@ -219,7 +219,7 @@ export default function ChannelPage() {
 
       <p>
         <button
-          onClick={() => resync(lastSeqOf(messages))}
+          onClick={() => resync(contiguousSeqOf(messages))}
           disabled={!channel || syncing}
         >
           {syncing ? "Buscando…" : "Buscar nuevos"}
