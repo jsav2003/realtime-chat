@@ -1,5 +1,6 @@
 package com.jsav.chat.realtime;
 
+import com.jsav.chat.ChatApplication;
 import com.jsav.chat.TestcontainersConfiguration;
 import com.jsav.chat.auth.JwtService;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
@@ -15,11 +16,17 @@ import com.jsav.chat.user.User;
 import com.jsav.chat.user.UserRepository;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.rabbitmq.RabbitMQContainer;
 
 /**
  * Base de los tests de tiempo real: servidor HTTP en un puerto aleatorio, Postgres y RabbitMQ
@@ -39,6 +46,9 @@ abstract class RealtimeIntegrationTest {
   @Autowired ChannelService channelService;
   @Autowired MessageService messages;
   @Autowired JwtService jwt;
+  @Autowired PostgreSQLContainer postgres;
+  @Autowired RabbitMQContainer rabbit;
+  @Autowired Environment env;
 
   User owner;
   User admin;
@@ -63,6 +73,52 @@ abstract class RealtimeIntegrationTest {
         channelService
             .create(owner.getId(), serverId, new CreateChannelRequest("secreto", "private"))
             .id();
+  }
+
+  private static ConfigurableApplicationContext instanceB;
+  static int portB;
+
+  /** Un bean de la instancia B; antes hay que haberla levantado con {@link #startInstanceB()}. */
+  <T> T instanceBBean(Class<T> type) {
+    return instanceB.getBean(type);
+  }
+
+  /** La instancia B se levanta una sola vez, la primera vez que un test la pide. */
+  synchronized MessageService startInstanceB() {
+    if (instanceB == null) {
+      instanceB =
+          new SpringApplicationBuilder(ChatApplication.class)
+              .run(
+                  "--server.port=0",
+                  "--spring.jmx.enabled=false",
+                  "--spring.datasource.url=" + postgres.getJdbcUrl(),
+                  "--spring.datasource.username=" + postgres.getUsername(),
+                  "--spring.datasource.password=" + postgres.getPassword(),
+                  "--spring.rabbitmq.host=" + rabbit.getHost(),
+                  "--spring.rabbitmq.port=" + rabbit.getAmqpPort(),
+                  "--spring.rabbitmq.username=" + rabbit.getAdminUsername(),
+                  "--spring.rabbitmq.password=" + rabbit.getAdminPassword(),
+                  "--app.realtime.relay-host=" + env.getProperty("app.realtime.relay-host"),
+                  "--app.realtime.relay-port=" + env.getProperty("app.realtime.relay-port"),
+                  "--app.realtime.relay-login=" + env.getProperty("app.realtime.relay-login"),
+                  "--app.realtime.relay-passcode=" + env.getProperty("app.realtime.relay-passcode"),
+                  "--app.jwt.secret=" + env.getProperty("app.jwt.secret"));
+
+      portB = Integer.parseInt(instanceB.getEnvironment().getProperty("local.server.port"));
+    }
+    return instanceB.getBean(MessageService.class);
+  }
+
+  @AfterAll
+  static void stopInstanceB() {
+    if (instanceB != null) {
+      instanceB.close();
+      instanceB = null;
+    }
+  }
+
+  StompTestClient connectToB(User user) {
+    return StompTestClient.connect(portB, token(user));
   }
 
   MessageService.Sent send(User user, Long channelId, String body) {
