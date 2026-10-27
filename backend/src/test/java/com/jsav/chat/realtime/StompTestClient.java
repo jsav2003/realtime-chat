@@ -97,6 +97,11 @@ final class StompTestClient implements AutoCloseable {
     }
   }
 
+  /** Manda un SEND. El servidor debería rechazarlo: el ERROR queda en {@link #pollError}. */
+  void send(String destination, String body) {
+    session.send(destination, body);
+  }
+
   /** El siguiente mensaje recibido, o {@code null} si no llega a tiempo. */
   String nextMessage(Duration wait) {
     return poll(messages, wait);
