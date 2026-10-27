@@ -43,5 +43,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # Cluster de dos instancias (perfil "cluster"): docker compose --profile cluster up --build
+  backend-a: &backend
+    profiles: ["cluster"]
+    build: ./backend
+    image: realtime-chat-backend:dev
+    environment: &backend-env
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_STOMP_PORT: 61613
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_A_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  backend-b:
+    <<: *backend
+    environment: *backend-env
+    ports:
+      - "${BACKEND_B_PORT:-8082}:8080"
+
 volumes:
   pgdata:
