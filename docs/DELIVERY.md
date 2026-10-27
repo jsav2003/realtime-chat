@@ -126,6 +126,24 @@ semilla 2 no es una reproducción exacta, y que ahora pase no prueba el arreglo 
 Lo que lo respalda es el análisis de la causa, la prueba unitaria `contiguousSeqStopsAtTheFirstHole`
 y las seis corridas limpias.
 
+## Comprobado que los tests muerden
+
+Un test que nunca falla no demuestra nada, así que cada garantía del backend se rompió a
+propósito y se corrió su test. Las cuatro roturas hicieron fallar lo que debían (todas
+compilan; el código se restauró con `git checkout` después de cada una):
+
+| Rotura | Test que la detecta | Resultado |
+|---|---|---|
+| Publicar antes del commit (`@EventListener` en vez de `AFTER_COMMIT`) | `PublishAfterCommitIntegrationTest` | 2 de 4 fallan: `aRolledBackTransactionPublishesNothing` y `aCommittedTransactionPublishesAfterTheCommit` |
+| Quitar el chequeo de `AccessPolicy` en `SUBSCRIBE` | `StompSubscribeIntegrationTest` | 3 de 9 fallan (extraño, canal inexistente, privado ajeno) |
+| Expulsar sin cerrar los sockets | `KickClosesSocketsIntegrationTest` | 2 de 3 fallan (misma instancia y otra instancia) |
+| Permitir `SEND` | `StompSendIntegrationTest` | 3 de 3 fallan |
+
+Del lado del arnés, lo que más se acerca a "quitar la resincronización" es la corrida de la
+semilla 2 antes del arreglo (sección anterior): con un cursor de resincronización
+incorrecto, las invariantes 1 y 3 fallaron. No se probó quitar la resincronización por
+completo.
+
 ## Lo que esto no demuestra
 
 - **Una sola máquina.** Las dos instancias, Postgres, RabbitMQ y los 8 clientes comparten el

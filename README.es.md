@@ -14,10 +14,10 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 3 de 9.** La autorización por HTTP y el orden de los mensajes en la base de
-> datos están construidos y verificados; la entrega en tiempo real (WebSocket, dos
-> instancias) está diseñada pero **todavía no implementada** (hito 4). Nada de lo que sigue
-> afirma un resultado que no exista.
+> **Estado: hito 4 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes
+> y la entrega en tiempo real entre dos instancias del backend están construidos y
+> verificados, con un arnés de entrega de semillas fijas. Presencia, menciones, adjuntos y
+> búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
 
 ## Estado
 
@@ -25,15 +25,15 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 |---|---|---|
 | 1 | Auth (bcrypt + JWT), usuarios, servidores, Flyway | hecho |
 | 2 | Canales, invitaciones, roles, `AccessPolicy`, matriz de autorización HTTP | hecho |
-| 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | **hecho** |
-| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | siguiente |
+| 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | hecho |
+| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | **hecho** |
 | 5 | Presencia y rate limiting | planeado |
 | 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | planeado |
 | 7 | Adjuntos (URLs prefirmadas de S3) | planeado |
 | 8 | Búsqueda y no leídos | planeado |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hitos 2 y 3)
+## Lo que ya está demostrado (hitos 2 a 4)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -61,8 +61,32 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   el historial. La página del canal usa los dos, y se resincroniza sola cuando un mensaje
   enviado revela un hueco.
 
-242 tests en total (unitarios, `@WebMvcTest`, integración con Testcontainers), formateados
-con Spotless.
+- **Entrega en vivo entre dos instancias.** Un mensaje guardado en la instancia A llega a un
+  cliente conectado a la B, en el mismo orden, por un relay STOMP de RabbitMQ. Los avisos
+  salen solo después del commit: un envío revertido no publica nada, un reintento no publica
+  nada y diez reintentos simultáneos publican exactamente un mensaje.
+- **Nadie puede escribir por el WebSocket.** Los mensajes se escriben solo por HTTP; todo
+  `SEND` por STOMP se rechaza, porque con el relay un `SEND` a `/topic/channel.N` llegaría a
+  los suscriptores sin pasar por el `seq` ni por `AccessPolicy`
+  ([ADR 0006](docs/adr/0006-envio-solo-por-http.md)). `SUBSCRIBE` pasa por `AccessPolicy` y lee
+  la base en cada suscripción, y una segunda matriz lo cubre (8 filas × 6 tipos de usuario,
+  48 celdas, en [`docs/AUTHZ.md`](docs/AUTHZ.md)).
+- **Expulsar corta los sockets en todas las instancias.** La instancia que atiende la
+  expulsión cierra los suyos y lo avisa por un exchange fanout de RabbitMQ para que la otra
+  haga lo mismo ([ADR 0007](docs/adr/0007-cerrar-sockets-al-expulsar.md)). Con un token que
+  sigue vigente, el expulsado puede reconectar pero recibe 404 en cada suscripción.
+- **Un arnés de entrega ([`harness/`](harness)).** 8 clientes envían 640 mensajes a la vez a
+  un canal, a través de un balanceador delante de dos instancias, se desconectan y reconectan
+  a cualquiera de las dos, reenvían mensajes confirmados, y a mitad de la corrida se reinicia
+  una instancia. Seis corridas con semilla terminaron con cero violaciones de las cuatro
+  invariantes (completo, sin duplicados, mismo orden, fiel); los números y lo que no
+  demuestran están en [`docs/DELIVERY.md`](docs/DELIVERY.md). Su primera corrida con la
+  semilla 2 **falló** y encontró un error real del cliente (el cursor de resincronización
+  debe ser el final de la racha sin huecos, no el mayor `seq`); está arreglado y documentado
+  ahí.
+
+363 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
+PostgreSQL y RabbitMQ reales) y 40 del arnés, formateados con Spotless.
 
 ## El diseño en 30 segundos
 
@@ -79,8 +103,9 @@ El chat es la parte fácil. Los dos problemas difíciles y la respuesta planeada
   Spring, para que un suscriptor en la instancia B reciba lo enviado por la A. Los avisos
   se publican solo después del commit, y los eventos de menciones pasan por una tabla
   *outbox* para que no se pierdan.
-- **Autorización por WebSocket:** la misma `AccessPolicy` corre en `SUBSCRIBE` y `SEND`, y
-  expulsar a alguien cierra sus sesiones abiertas.
+- **Autorización por WebSocket:** la misma `AccessPolicy` corre en cada `SUBSCRIBE`, todo
+  `SEND` se rechaza (los mensajes se escriben solo por HTTP), y expulsar a alguien cierra sus
+  sesiones abiertas en todas las instancias.
 
 ```mermaid
 flowchart LR
@@ -93,17 +118,18 @@ flowchart LR
   FE -. URLs prefirmadas .-> S3[(S3)]
 ```
 
-Hoy solo existen PostgreSQL, la API REST y el frontend; Redis, RabbitMQ y la segunda
-instancia llegan en los hitos 4 a 6.
+Hoy existen PostgreSQL, la API REST, el frontend, el relay STOMP de RabbitMQ y el cluster
+de dos instancias; Redis (presencia, rate limiting) y el worker de notificaciones llegan en
+los hitos 5 y 6.
 
 ## Documentos
 
 | Archivo | Qué es |
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | El diseño, escrito antes del código: problemas, decisiones, plan de verificación, hitos |
-| [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y la matriz HTTP completa (la verifica un test) |
-| [`docs/adr/`](docs/adr) | Cinco decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos |
-| [`docs/DELIVERY.md`](docs/DELIVERY.md) | El arnés de entrega y sus resultados (vacío hasta el hito 4) |
+| [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y las matrices HTTP y STOMP completas (las verifican tests) |
+| [`docs/adr/`](docs/adr) | Siete decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar |
+| [`docs/DELIVERY.md`](docs/DELIVERY.md) | La garantía de entrega, el arnés, sus resultados y sus límites |
 | [`docs/v2.md`](docs/v2.md) | Ideas que quedaron fuera a propósito (bans, revocar invitaciones…) |
 
 > El texto de la interfaz, los mensajes de error de la API y los documentos de diseño están
@@ -127,8 +153,18 @@ cd ../frontend
 npm install && npm run dev               # app en :3000, /api se reenvía al backend
 ```
 
-Para regenerar la matriz de `docs/AUTHZ.md` después de cambiarla:
-`./mvnw test -Dtest=AuthorizationMatrixTest -Dauthz.update=true`.
+Para levantar dos instancias detrás de un balanceador (lo necesita el arnés) y correr el arnés:
+
+```bash
+docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balanceador :8088
+backend/mvnw -f harness/pom.xml compile exec:java -Dexec.args="--seed 42"
+```
+
+Para usar el cluster desde el navegador, el frontend se arranca con
+`API_URL=http://localhost:8088 NEXT_PUBLIC_WS_URL=ws://localhost:8088/ws npm run dev`.
+
+Para regenerar las matrices de `docs/AUTHZ.md` después de cambiarlas:
+`./mvnw test -Dtest='AuthorizationMatrixTest,StompAuthorizationMatrixTest' -Dauthz.update=true`.
 
 Los valores por defecto de `application.properties` (`dev-password`, un secreto JWT de
 desarrollo) son solo para uso local; en un despliegue real se sobrescriben con variables de
@@ -137,9 +173,11 @@ entorno (`JWT_SECRET` de al menos 32 caracteres).
 ## Estructura
 
 ```
-backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, access (AccessPolicy)
-frontend/   Next.js 16: login, registro, servidores, canales, página de invitación
-docs/       matriz de autorización, arnés de entrega, ADR, ideas para v2
+backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access
+frontend/   Next.js 16: login, registro, servidores, canales (en vivo), página de invitación
+harness/    arnés de entrega: N clientes STOMP contra dos instancias, cuatro invariantes
+nginx/      configuración del balanceador del cluster de dos instancias
+docs/       matrices de autorización, resultados de entrega, ADR, ideas para v2
 ```
 
 ## Fuera de alcance
