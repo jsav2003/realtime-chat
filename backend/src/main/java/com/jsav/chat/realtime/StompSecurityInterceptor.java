@@ -3,12 +3,15 @@ package com.jsav.chat.realtime;
 import com.jsav.chat.access.AccessPolicy;
 import com.jsav.chat.access.ChannelAction;
 import com.jsav.chat.common.BadRequestException;
+import com.jsav.chat.common.ForbiddenException;
 import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.common.UnauthorizedException;
 import java.security.Principal;
 import java.util.List;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.simp.SimpMessageType;
+import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
@@ -42,12 +45,24 @@ public class StompSecurityInterceptor implements ChannelInterceptor {
   public Message<?> preSend(Message<?> message, MessageChannel channel) {
     StompHeaderAccessor accessor =
         MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-    if (accessor == null || accessor.getCommand() == null) {
-      return message;
+    if (accessor == null) {
+      // Un frame que no se sabe leer no pasa: ante la duda, cerrado.
+      throw new BadRequestException("Frame STOMP no reconocido");
     }
-    switch (accessor.getCommand()) {
+    StompCommand command = accessor.getCommand();
+    if (command == null) {
+      if (accessor.getMessageType() == SimpMessageType.HEARTBEAT) {
+        return message;
+      }
+      throw new BadRequestException("Frame STOMP no reconocido");
+    }
+    switch (command) {
       case CONNECT -> authenticate(accessor);
       case SUBSCRIBE -> authorizeSubscribe(accessor);
+      case SEND ->
+          // Con el relay, un SEND a /topic/channel.N llegaría a los suscriptores sin pasar por el
+          // seq ni por AccessPolicy. Se escribe solo por HTTP (ADR 0006).
+          throw new ForbiddenException("Los mensajes se envían por HTTP; STOMP solo recibe");
       case DISCONNECT, UNSUBSCRIBE -> {}
       default -> throw new BadRequestException("Comando STOMP no soportado");
     }
