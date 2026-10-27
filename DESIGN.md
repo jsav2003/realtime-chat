@@ -82,6 +82,14 @@ coinciden, y ordenar por ellos es la causa del tercer caso de la tabla.
   Resuelve el quinto caso: el mensaje que no llegó en vivo se recupera igual.
 - **Si recibe un `seq` que ya tenía,** lo descarta.
 
+**El cursor de la resincronización es el final de la racha completa, no el mayor `seq`.**
+Pedir "lo posterior al mayor `seq` que tengo" deja un hueco para siempre si un mensaje en
+vivo llegó antes que los anteriores (por ejemplo, justo al reconectar) y el pedido que lo
+iba a llenar falló. Lo encontró el arnés de entrega (`docs/DELIVERY.md`); el cursor correcto
+es el mayor `n` tal que se tienen todos los `seq` de 1 a `n` (o, con un historial parcial,
+de la primera a `n`). Al reconectar, el cliente se suscribe con `receipt` y recién cuando el
+servidor lo confirma pide por HTTP lo que le falta.
+
 **Idempotencia del envío.** El cliente genera un `client_msg_id` único por mensaje y lo
 manda en cada reintento. Con `UNIQUE (author_id, client_msg_id)`, un reintento devuelve el
 mensaje ya guardado en vez de crear otro. Resuelve el segundo caso.
@@ -127,11 +135,15 @@ Cada servidor es un espacio aislado. Las fallas típicas:
   existe. Para quien no es miembro, la respuesta correcta es 404.
 
 **El diseño:** toda decisión de acceso pasa por un solo componente (`AccessPolicy`) que
-recibe usuario, recurso y acción. Lo usan los controladores HTTP, el interceptor de
-mensajes STOMP en `SUBSCRIBE` y en `SEND`, y el servicio de expulsión. Con el relay, las
-suscripciones viven en el broker y el backend no puede quitar una sola de forma
-sencilla. Por eso, al expulsar, se cierran las sesiones WebSocket abiertas del usuario.
-Cuando reconecta, la `AccessPolicy` ya rechaza la suscripción a los canales de ese
+recibe usuario, recurso y acción. Lo usan los controladores HTTP y el interceptor de
+mensajes STOMP en `SUBSCRIBE`. En STOMP solo se recibe: los mensajes se escriben por HTTP y
+**todo `SEND` se rechaza** (ADR 0006), porque con el relay un `SEND` a `/topic/channel.N`
+llegaría a los suscriptores sin pasar por el `seq` ni por la `AccessPolicy`.
+
+Con el relay, las suscripciones viven en el broker y el backend no puede quitar una sola de
+forma sencilla. Por eso, al expulsar, se cierran las sesiones WebSocket abiertas del
+usuario, en todas las instancias, con un aviso por un exchange fanout de RabbitMQ (ADR
+0007). Cuando reconecta, la `AccessPolicy` ya rechaza la suscripción a los canales de ese
 servidor.
 
 ## 5. Problemas secundarios
@@ -257,7 +269,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 1 · Auth, usuarios y servidores | 14 | Registro y login con bcrypt y JWT; crear servidor y listar los míos; Flyway; `@ControllerAdvice` |
 | 2 · Canales, invitaciones y permisos | 14 | `AccessPolicy` en cada endpoint; invitaciones por link; matriz de autorización HTTP en verde |
 | 3 · Mensajes | 14 | `seq` por canal, `client_msg_id`, paginación por cursor; test de 50 envíos simultáneos en verde |
-| 4 · Tiempo real | 20 | STOMP con relay a RabbitMQ, dos instancias, resincronización por `seq`, autorización en `SUBSCRIBE`; **arnés de entrega en verde** |
+| 4 · Tiempo real | 20 | STOMP con relay a RabbitMQ, dos instancias, resincronización por `seq`, autorización en `SUBSCRIBE` (y `SEND` rechazado); **arnés de entrega en verde** (hecho, ver `docs/DELIVERY.md`) |
 | 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico |
 | 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde |
 | 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño |
