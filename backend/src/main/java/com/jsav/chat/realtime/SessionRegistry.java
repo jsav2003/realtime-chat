@@ -1,9 +1,13 @@
 package com.jsav.chat.realtime;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 /**
@@ -14,6 +18,8 @@ import org.springframework.web.socket.WebSocketSession;
  */
 @Component
 public class SessionRegistry {
+
+  private static final Logger log = LoggerFactory.getLogger(SessionRegistry.class);
 
   private final ConcurrentMap<String, WebSocketSession> sockets = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Long> owners = new ConcurrentHashMap<>();
@@ -41,6 +47,24 @@ public class SessionRegistry {
         .map(e -> sockets.get(e.getKey()))
         .filter(s -> s != null)
         .toList();
+  }
+
+  /**
+   * Cierra los sockets de {@code userId} en esta instancia con 1008 (policy violation). Devuelve
+   * cuántos cerró. Al cerrar el socket, Spring manda DISCONNECT al broker y RabbitMQ descarta sus
+   * suscripciones; cuando reconecte, {@code SUBSCRIBE} vuelve a pasar por {@code AccessPolicy}.
+   */
+  public int closeSocketsOf(Long userId) {
+    int closed = 0;
+    for (WebSocketSession socket : socketsOf(userId)) {
+      try {
+        socket.close(CloseStatus.POLICY_VIOLATION.withReason("Ya no tienes acceso"));
+        closed++;
+      } catch (IOException e) {
+        log.warn("No se pudo cerrar el socket {} del usuario {}", socket.getId(), userId, e);
+      }
+    }
+    return closed;
   }
 
   int openSockets() {
