@@ -123,7 +123,7 @@ public final class SimulatedClient implements AutoCloseable {
     synchronized (resyncLock) {
       for (int attempt = 0; attempt < 60 && !stopped.get(); attempt++) {
         try {
-          for (Stored m : api.listAfter(account, channelId, log.lastSeq())) {
+          for (Stored m : api.listAfter(account, channelId, log.contiguousSeq())) {
             log.receive(m, ClientLog.Source.RESYNC);
           }
           resyncs.incrementAndGet();
@@ -199,7 +199,7 @@ public final class SimulatedClient implements AutoCloseable {
     @Override
     public void handleFrame(StompHeaders headers, Object payload) {
       String json = (String) payload;
-      long known = log.lastSeq();
+      long known = log.contiguousSeq();
       Stored m =
           new Stored(
               ((Number) JsonPath.read(json, "$.seq")).longValue(),
