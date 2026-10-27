@@ -13,10 +13,15 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.simp.annotation.support.SimpAnnotationMethodMessageHandler;
 
 /**
  * Matriz de autorización de STOMP (DESIGN.md §8.2): cada destino y comando contra cada tipo de
@@ -172,6 +177,27 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
               "403",
               "401",
               "403"));
+
+  @Autowired SimpAnnotationMethodMessageHandler annotatedHandlers;
+
+  /**
+   * Si alguien agrega un {@code @MessageMapping} o un {@code @SubscribeMapping}, aparece un destino
+   * de aplicación nuevo que esta matriz no cubre. Hoy no hay ninguno: se escribe solo por HTTP (ADR
+   * 0006) y el único destino al que se suscribe es {@code /topic/channel.{id}}.
+   */
+  @Test
+  void everyStompDestinationIsInTheMatrix() {
+    assertThat(annotatedHandlers.getHandlerMethods())
+        .as("hay destinos STOMP de aplicación sin fila en la matriz: agrégalos a MATRIX")
+        .isEmpty();
+
+    Set<String> covered = new TreeSet<>();
+    MATRIX.forEach(r -> covered.add(r.key()));
+    assertThat(covered)
+        .as("el destino de suscripción real debe estar en la matriz, y SEND también")
+        .contains("SUBSCRIBE " + CHANNEL_TOPIC, "SEND " + CHANNEL_TOPIC);
+    assertThat(ChannelTopic.of(1)).matches(CHANNEL_TOPIC.replace("{channelId}", "1"));
+  }
 
   private static final AtomicInteger WORLDS = new AtomicInteger();
 
