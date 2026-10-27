@@ -30,8 +30,9 @@ class StompSecurityInterceptorTest {
 
   private final JwtDecoder decoder = mock(JwtDecoder.class);
   private final AccessPolicy policy = mock(AccessPolicy.class);
+  private final SessionRegistry sessions = mock(SessionRegistry.class);
   private final StompSecurityInterceptor interceptor =
-      new StompSecurityInterceptor(decoder, policy);
+      new StompSecurityInterceptor(decoder, policy, sessions);
 
   private static Message<byte[]> frame(StompCommand command, String authorization) {
     StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
@@ -76,6 +77,21 @@ class StompSecurityInterceptorTest {
         MessageHeaderAccessor.getAccessor(connect, StompHeaderAccessor.class);
     assertThat(accessor.getUser()).isNotNull();
     assertThat(accessor.getUser().getName()).isEqualTo("7");
+  }
+
+  @Test
+  void connectWithAValidToken_bindsTheSessionToTheUser() {
+    Jwt jwt = Jwt.withTokenValue("ok").header("alg", "HS256").subject("7").build();
+    when(decoder.decode("ok")).thenReturn(jwt);
+    StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+    accessor.addNativeHeader("Authorization", "Bearer ok");
+    accessor.setSessionId("sess-1");
+    accessor.setLeaveMutable(true);
+
+    interceptor.preSend(
+        MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders()), null);
+
+    verify(sessions).bind("sess-1", 7L);
   }
 
   @Test

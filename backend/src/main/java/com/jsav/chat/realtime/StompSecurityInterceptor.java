@@ -35,10 +35,13 @@ public class StompSecurityInterceptor implements ChannelInterceptor {
 
   private final JwtDecoder jwtDecoder;
   private final AccessPolicy policy;
+  private final SessionRegistry sessions;
 
-  public StompSecurityInterceptor(JwtDecoder jwtDecoder, AccessPolicy policy) {
+  public StompSecurityInterceptor(
+      JwtDecoder jwtDecoder, AccessPolicy policy, SessionRegistry sessions) {
     this.jwtDecoder = jwtDecoder;
     this.policy = policy;
+    this.sessions = sessions;
   }
 
   @Override
@@ -93,5 +96,6 @@ public class StompSecurityInterceptor implements ChannelInterceptor {
       throw new UnauthorizedException("Token inválido");
     }
     accessor.setUser(new UsernamePasswordAuthenticationToken(jwt.getSubject(), null, List.of()));
+    sessions.bind(accessor.getSessionId(), Long.valueOf(jwt.getSubject()));
   }
 }

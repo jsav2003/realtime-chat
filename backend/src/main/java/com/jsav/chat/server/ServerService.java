@@ -13,6 +13,7 @@ import com.jsav.chat.server.ServerDtos.MemberResponse;
 import com.jsav.chat.server.ServerDtos.ServerDetailResponse;
 import com.jsav.chat.server.ServerDtos.ServerResponse;
 import java.util.List;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,18 +25,21 @@ public class ServerService {
   private final ChannelRepository channels;
   private final ChannelMemberRepository channelMembers;
   private final AccessPolicy policy;
+  private final ApplicationEventPublisher events;
 
   public ServerService(
       ServerRepository servers,
       ServerMemberRepository members,
       ChannelRepository channels,
       ChannelMemberRepository channelMembers,
-      AccessPolicy policy) {
+      AccessPolicy policy,
+      ApplicationEventPublisher events) {
     this.servers = servers;
     this.members = members;
     this.channels = channels;
     this.channelMembers = channelMembers;
     this.policy = policy;
+    this.events = events;
   }
 
   /** El servidor, su owner y el canal #general se guardan en la misma transacción. */
@@ -87,13 +91,14 @@ public class ServerService {
 
   /**
    * Saca al miembro del servidor y de sus canales privados en una sola transacción; si no, al
-   * volver con otra invitación recuperaría los privados. Cerrar sus WebSockets abiertos llega en el
-   * hito 4.
+   * volver con otra invitación recuperaría los privados. Sus WebSockets abiertos se cierran cuando
+   * la transacción confirma, con {@link UserKicked}.
    */
   @Transactional
   public void kick(Long actorId, Long serverId, Long targetId) {
     policy.requireCanActOn(actorId, serverId, targetId, ServerAction.KICK);
     channelMembers.removeFromServer(serverId, targetId);
     members.deleteMember(serverId, targetId);
+    events.publishEvent(new UserKicked(serverId, targetId));
   }
 }
