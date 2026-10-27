@@ -1,5 +1,6 @@
 package com.jsav.chat.realtime;
 
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.AmqpException;
@@ -25,6 +26,9 @@ public class ControlChannel {
 
   private static final Logger log = LoggerFactory.getLogger(ControlChannel.class);
 
+  /** Identifica a esta instancia en los avisos que publica, para no reaccionar a su propio eco. */
+  private final String instanceId = UUID.randomUUID().toString();
+
   private final RabbitTemplate rabbit;
   private final SessionRegistry sessions;
 
@@ -33,10 +37,14 @@ public class ControlChannel {
     this.sessions = sessions;
   }
 
-  /** Avisa a todas las instancias (incluida esta) que corten los sockets de {@code userId}. */
+  /**
+   * Avisa a las demás instancias que corten los sockets de {@code userId}. Esta instancia no se
+   * entera de su propio aviso: ya cerró los suyos directamente, y reaccionar al eco cortaría
+   * también el socket nuevo con el que el usuario reconectó entre tanto.
+   */
   public void announceKicked(Long userId) {
     try {
-      rabbit.convertAndSend(EXCHANGE, "", KICKED + userId);
+      rabbit.convertAndSend(EXCHANGE, "", KICKED + userId + ":" + instanceId);
     } catch (AmqpException e) {
       log.warn("No se pudo avisar la expulsión del usuario {} a las demás instancias", userId, e);
     }
@@ -45,7 +53,11 @@ public class ControlChannel {
   @RabbitListener(queues = "#{controlQueue.name}")
   void onControl(String body) {
     if (body.startsWith(KICKED)) {
-      Long userId = Long.valueOf(body.substring(KICKED.length()));
+      String[] parts = body.substring(KICKED.length()).split(":", 2);
+      if (parts.length == 2 && parts[1].equals(instanceId)) {
+        return;
+      }
+      Long userId = Long.valueOf(parts[0]);
       int closed = sessions.closeSocketsOf(userId);
       log.info("Expulsión del usuario {}: {} socket(s) cerrados en esta instancia", userId, closed);
     }
