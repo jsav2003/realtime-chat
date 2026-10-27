@@ -133,7 +133,11 @@ final class StompTestClient implements AutoCloseable {
   public void close() {
     StompSession s = session;
     if (s != null && s.isConnected()) {
-      s.disconnect();
+      try {
+        s.disconnect();
+      } catch (RuntimeException e) {
+        // Tras un frame ERROR el servidor cierra el socket; llegar tarde a desconectar es normal.
+      }
     }
     client.stop();
   }
