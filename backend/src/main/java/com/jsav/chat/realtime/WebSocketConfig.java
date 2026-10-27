@@ -20,9 +20,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
   public static final String TOPIC_PREFIX = "/topic";
 
   private final RealtimeProperties props;
+  private final StompSecurityInterceptor security;
 
-  public WebSocketConfig(RealtimeProperties props) {
+  public WebSocketConfig(RealtimeProperties props, StompSecurityInterceptor security) {
     this.props = props;
+    this.security = security;
   }
 
   @Override
