@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.jsav.chat.access.AccessPolicy;
 import com.jsav.chat.common.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
@@ -19,7 +20,8 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 class StompSecurityInterceptorTest {
 
   private final JwtDecoder decoder = mock(JwtDecoder.class);
-  private final StompSecurityInterceptor interceptor = new StompSecurityInterceptor(decoder);
+  private final StompSecurityInterceptor interceptor =
+      new StompSecurityInterceptor(decoder, mock(AccessPolicy.class));
 
   private static Message<byte[]> frame(StompCommand command, String authorization) {
     StompHeaderAccessor accessor = StompHeaderAccessor.create(command);

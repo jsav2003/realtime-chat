@@ -1,10 +1,14 @@
 package com.jsav.chat.realtime;
 
+import com.jsav.chat.access.AccessPolicy;
+import com.jsav.chat.access.ChannelAction;
+import com.jsav.chat.common.BadRequestException;
+import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.common.UnauthorizedException;
+import java.security.Principal;
 import java.util.List;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
@@ -27,9 +31,11 @@ import org.springframework.stereotype.Component;
 public class StompSecurityInterceptor implements ChannelInterceptor {
 
   private final JwtDecoder jwtDecoder;
+  private final AccessPolicy policy;
 
-  public StompSecurityInterceptor(JwtDecoder jwtDecoder) {
+  public StompSecurityInterceptor(JwtDecoder jwtDecoder, AccessPolicy policy) {
     this.jwtDecoder = jwtDecoder;
+    this.policy = policy;
   }
 
   @Override
@@ -39,10 +45,24 @@ public class StompSecurityInterceptor implements ChannelInterceptor {
     if (accessor == null || accessor.getCommand() == null) {
       return message;
     }
-    if (accessor.getCommand() == StompCommand.CONNECT) {
-      authenticate(accessor);
+    switch (accessor.getCommand()) {
+      case CONNECT -> authenticate(accessor);
+      case SUBSCRIBE -> authorizeSubscribe(accessor);
+      case DISCONNECT, UNSUBSCRIBE -> {}
+      default -> throw new BadRequestException("Comando STOMP no soportado");
     }
     return message;
+  }
+
+  private void authorizeSubscribe(StompHeaderAccessor accessor) {
+    Principal user = accessor.getUser();
+    if (user == null) {
+      throw new UnauthorizedException("No autenticado");
+    }
+    long channelId =
+        ChannelTopic.parse(accessor.getDestination())
+            .orElseThrow(() -> new NotFoundException("Destino no encontrado"));
+    policy.requireChannel(Long.valueOf(user.getName()), channelId, ChannelAction.READ);
   }
 
   /** Valida el JWT del frame CONNECT. El navegador no puede mandarlo en el handshake. */
