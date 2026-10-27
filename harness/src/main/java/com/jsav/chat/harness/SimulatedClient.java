@@ -87,6 +87,7 @@ public final class SimulatedClient implements AutoCloseable {
 
   /** Conecta a {@code instance}; si falla, lo intenta de nuevo con la otra, hasta conseguirlo. */
   public void connect(Instance instance) {
+    dropConnection(); // nunca dos sesiones abiertas del mismo cliente
     Instance target = instance;
     while (!stopped.get()) {
       try {
