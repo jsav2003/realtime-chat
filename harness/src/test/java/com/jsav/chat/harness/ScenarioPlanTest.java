@@ -21,6 +21,7 @@ class ScenarioPlanTest {
         BASE.duplicateRate(),
         BASE.disconnects(),
         BASE.restartAt(),
+        BASE.paceMillis(),
         BASE.lbUrl(),
         BASE.instanceAUrl(),
         BASE.instanceBUrl());
@@ -74,14 +75,14 @@ class ScenarioPlanTest {
               assertThat(d.client()).isBetween(0, BASE.clients() - 1);
             });
     assertThat(plan.restart().atConfirmed())
-        .isEqualTo((int) Math.round(BASE.totalMessages() * 0.4));
+        .isEqualTo((int) Math.round(BASE.totalMessages() * BASE.restartAt()));
   }
 
   @Test
   void aboutTheRequestedShareOfSendsIsResent() {
     ScenarioPlan plan = ScenarioPlan.generate(withSeed(7));
 
-    assertThat(plan.plannedResends()).isBetween(30L, 120L); // 15 % de 480 es 72
+    assertThat(plan.plannedResends()).isBetween(40L, 160L); // 15 % de 640 es 96
   }
 
   @Test

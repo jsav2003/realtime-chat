@@ -81,6 +81,11 @@ public final class SimulatedClient implements AutoCloseable {
     return resyncs.get();
   }
 
+  public boolean isConnected() {
+    StompSession s = session;
+    return s != null && s.isConnected();
+  }
+
   public Instance currentInstance() {
     return current;
   }

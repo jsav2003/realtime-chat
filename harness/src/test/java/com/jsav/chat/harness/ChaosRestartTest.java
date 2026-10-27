@@ -20,6 +20,7 @@ class ChaosRestartTest {
             0,
             0, // sin desconexiones: aquí solo importa el reinicio
             restartAt,
+            sc.paceMillis(),
             sc.lbUrl(),
             sc.instanceAUrl(),
             sc.instanceBUrl()));

@@ -66,7 +66,7 @@ public final class ScenarioPlan {
                 i,
                 messageId(sc.seed(), c, i),
                 "c" + c + "-m" + i,
-                rnd.nextInt(60),
+                rnd.nextInt(sc.paceMillis()),
                 rnd.nextDouble() < sc.duplicateRate()));
       }
       sends.add(List.copyOf(mine));

@@ -17,6 +17,7 @@ public record Scenario(
     double duplicateRate,
     int disconnects,
     double restartAt,
+    int paceMillis,
     String lbUrl,
     String instanceAUrl,
     String instanceBUrl) {
@@ -25,17 +26,27 @@ public record Scenario(
       new Scenario(
           42,
           8,
-          60,
+          80,
           0.15,
           12,
-          0.4,
+          0.2,
+          700,
           "http://localhost:8088",
           "http://localhost:8081",
           "http://localhost:8082");
 
   private static final Set<String> OPTIONS =
       Set.of(
-          "seed", "clients", "messages", "duplicates", "disconnects", "restart-at", "lb", "a", "b");
+          "seed",
+          "clients",
+          "messages",
+          "duplicates",
+          "disconnects",
+          "restart-at",
+          "pace-ms",
+          "lb",
+          "a",
+          "b");
 
   public int totalMessages() {
     return clients * messagesPerClient;
@@ -66,11 +77,17 @@ public record Scenario(
             Double.parseDouble(given.getOrDefault("duplicates", String.valueOf(d.duplicateRate))),
             Integer.parseInt(given.getOrDefault("disconnects", String.valueOf(d.disconnects))),
             Double.parseDouble(given.getOrDefault("restart-at", String.valueOf(d.restartAt))),
+            Integer.parseInt(given.getOrDefault("pace-ms", String.valueOf(d.paceMillis))),
             given.getOrDefault("lb", d.lbUrl),
             given.getOrDefault("a", d.instanceAUrl),
             given.getOrDefault("b", d.instanceBUrl));
-    if (s.clients < 2 || s.messagesPerClient < 1 || s.restartAt < 0 || s.restartAt > 1) {
-      throw new IllegalArgumentException("clients >= 2, messages >= 1 y restart-at entre 0 y 1");
+    if (s.clients < 2
+        || s.messagesPerClient < 1
+        || s.restartAt < 0
+        || s.restartAt > 1
+        || s.paceMillis < 1) {
+      throw new IllegalArgumentException(
+          "clients >= 2, messages >= 1, pace-ms >= 1 y restart-at entre 0 y 1");
     }
     return s;
   }
