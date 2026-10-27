@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,11 +35,17 @@ public class MessageService {
   private final MessageRepository messages;
   private final AccessPolicy policy;
   private final TransactionTemplate tx;
+  private final ApplicationEventPublisher events;
 
-  public MessageService(MessageRepository messages, AccessPolicy policy, TransactionTemplate tx) {
+  public MessageService(
+      MessageRepository messages,
+      AccessPolicy policy,
+      TransactionTemplate tx,
+      ApplicationEventPublisher events) {
     this.messages = messages;
     this.policy = policy;
     this.tx = tx;
+    this.events = events;
   }
 
   /**
@@ -76,7 +83,10 @@ public class MessageService {
         messages
             .insert(channelId, seq, userId, req.clientMsgId(), req.body().strip())
             .orElseThrow(LostRetryRace::new);
-    return new Sent(MessageResponse.from(saved), false);
+    MessageResponse response = MessageResponse.from(saved);
+    // Dentro de la transacción a propósito: el aviso real sale en AFTER_COMMIT (ADR 0003).
+    events.publishEvent(new MessageCreated(response));
+    return new Sent(response, false);
   }
 
   /**

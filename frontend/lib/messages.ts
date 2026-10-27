@@ -11,9 +11,25 @@ export function mergeBySeq(current: Message[], incoming: Message[]): Message[] {
   return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
 }
 
-/** El último seq que el cliente tiene, o 0 si no tiene ninguno. */
+/** El último seq que el cliente tiene, o 0 si no tiene ninguno. Puede haber huecos por debajo. */
 export const lastSeqOf = (messages: Message[]) =>
   messages.length === 0 ? 0 : messages[messages.length - 1].seq;
+
+/**
+ * El final de la racha sin huecos que empieza en el primer mensaje que se tiene, o 0 si no hay
+ * ninguno. Es el cursor correcto para resincronizar: pedir "lo posterior al último seq" dejaría un
+ * hueco para siempre si un mensaje en vivo llegó antes que los anteriores (por ejemplo, justo al
+ * reconectar) y el pedido que lo iba a llenar falló. `messages` va ordenado por seq.
+ */
+export function contiguousSeqOf(messages: Message[]): number {
+  if (messages.length === 0) return 0;
+  let end = messages[0].seq;
+  for (let i = 1; i < messages.length; i++) {
+    if (messages[i].seq !== end + 1) break;
+    end = messages[i].seq;
+  }
+  return end;
+}
 
 const RETRY_DELAYS_MS = [500, 1500];
 

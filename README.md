@@ -14,9 +14,10 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 3 of 9.** Authorization over HTTP and message ordering in the database
-> are built and verified; real-time delivery (WebSocket, two instances) is designed but **not
-> implemented yet** (milestone 4). Nothing below claims a result that does not exist.
+> **Status: milestone 4 of 9.** Authorization over HTTP and WebSocket, message ordering, and
+> real-time delivery across two backend instances are built and verified, including a delivery
+> harness with fixed seeds. Presence, mentions, attachments and search are not built yet.
+> Nothing below claims a result that does not exist.
 
 ## Status
 
@@ -24,15 +25,15 @@ tested on purpose**, not just claimed:
 |---|---|---|
 | 1 | Auth (bcrypt + JWT), users, servers, Flyway | done |
 | 2 | Channels, invite links, roles, `AccessPolicy`, HTTP authorization matrix | done |
-| 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | **done** |
-| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | next |
+| 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | done |
+| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | **done** |
 | 5 | Presence and rate limiting | planned |
 | 6 | Mentions: outbox, worker, retries, dead-letter queue | planned |
 | 7 | Attachments (presigned S3 URLs) | planned |
 | 8 | Search and unread counts | planned |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestones 2 and 3)
+## What is already proven (milestones 2 to 4)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -58,7 +59,31 @@ tested on purpose**, not just claimed:
 - **Cursor pagination by `seq`:** `after_seq` to catch up, `before_seq` for history. The
   channel page uses both, and resyncs on its own when a sent message reveals a gap.
 
-242 tests in total (unit, `@WebMvcTest`, Testcontainers integration), Spotless-formatted.
+- **Live delivery across two instances.** A message saved on instance A reaches a client
+  connected to instance B, in the same order, through a RabbitMQ STOMP relay. Notifications
+  go out only after the commit: a rolled-back send publishes nothing, a replayed send
+  publishes nothing, and ten simultaneous retries publish exactly one frame.
+- **Nobody can write through the WebSocket.** Messages are only written over HTTP; every
+  STOMP `SEND` is rejected, because with the relay a `SEND` to `/topic/channel.N` would reach
+  subscribers without going through the `seq` or `AccessPolicy`
+  ([ADR 0006](docs/adr/0006-envio-solo-por-http.md)). `SUBSCRIBE` goes through `AccessPolicy`
+  and reads the database on every subscription, and a second matrix covers it
+  (8 rows × 6 user types, 48 cells, in [`docs/AUTHZ.md`](docs/AUTHZ.md)).
+- **Kicking someone closes their sockets, on every instance.** The instance that handles the
+  kick closes its own sockets and announces it on a RabbitMQ fanout exchange so the other
+  instance does the same ([ADR 0007](docs/adr/0007-cerrar-sockets-al-expulsar.md)). With a
+  still-valid token the kicked user can reconnect but gets 404 on every subscription.
+- **A delivery harness ([`harness/`](harness)).** 8 clients send 640 messages at once to
+  one channel through a load balancer in front of two instances, disconnect and reconnect to
+  either instance, resend confirmed messages, and one instance is restarted mid-run. Six
+  seeded runs ended with zero violations of the four invariants (complete, no duplicates,
+  same order, faithful); see [`docs/DELIVERY.md`](docs/DELIVERY.md) for the numbers and what
+  they do not prove. Its first run on seed 2 **failed** and found a real client bug (the
+  resync cursor must be the end of the gap-free run, not the highest `seq`); that is fixed
+  and written up there.
+
+363 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL
+and RabbitMQ) and 40 harness tests, Spotless-formatted.
 
 ## The design in 30 seconds
 
@@ -74,8 +99,9 @@ The chat is the easy part. The two hard problems, and the planned answer to each
   broker, so a subscriber on instance B receives what was sent through A. Notifications are
   published only after the transaction commits, and mention events go through an outbox
   table so they can't be lost.
-- **Authorization over WebSocket:** the same `AccessPolicy` runs on `SUBSCRIBE` and `SEND`,
-  and kicking someone closes their open sessions.
+- **Authorization over WebSocket:** the same `AccessPolicy` runs on every `SUBSCRIBE`, every
+  `SEND` is rejected (messages are written over HTTP only), and kicking someone closes their
+  open sessions on every instance.
 
 ```mermaid
 flowchart LR
@@ -88,17 +114,18 @@ flowchart LR
   FE -. presigned URLs .-> S3[(S3)]
 ```
 
-Only PostgreSQL, the REST API and the frontend exist today; Redis, RabbitMQ and the second
-instance arrive in milestones 4–6.
+PostgreSQL, the REST API, the frontend, the RabbitMQ STOMP relay and the two-instance cluster
+exist today; Redis (presence, rate limiting) and the notification worker arrive in
+milestones 5 and 6.
 
 ## Documents
 
 | File | What it is |
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The design, written before the code: problems, decisions, verification plan, milestones |
-| [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP matrix (checked by a test) |
-| [`docs/adr/`](docs/adr) | Five decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps |
-| [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery harness and its results (placeholder until milestone 4) |
+| [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP and STOMP matrices (checked by tests) |
+| [`docs/adr/`](docs/adr) | Seven decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick |
+| [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery guarantee, the harness, its results and its limits |
 | [`docs/v2.md`](docs/v2.md) | Ideas left out on purpose (bans, invite revocation…) |
 
 > UI text, API error messages and the design documents are in Spanish (the project started
@@ -121,8 +148,18 @@ cd ../frontend
 npm install && npm run dev               # app on :3000, /api is proxied to the backend
 ```
 
-To regenerate the matrix in `docs/AUTHZ.md` after changing it:
-`./mvnw test -Dtest=AuthorizationMatrixTest -Dauthz.update=true`.
+To run two instances behind a load balancer (needed by the harness) and run the harness:
+
+```bash
+docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balancer :8088
+backend/mvnw -f harness/pom.xml compile exec:java -Dexec.args="--seed 42"
+```
+
+To use the cluster from the browser, start the frontend with
+`API_URL=http://localhost:8088 NEXT_PUBLIC_WS_URL=ws://localhost:8088/ws npm run dev`.
+
+To regenerate the matrices in `docs/AUTHZ.md` after changing them:
+`./mvnw test -Dtest='AuthorizationMatrixTest,StompAuthorizationMatrixTest' -Dauthz.update=true`.
 
 The defaults in `application.properties` (`dev-password`, a development JWT secret) are for
 local use only; override them with environment variables (`JWT_SECRET` must be at least 32
@@ -131,9 +168,11 @@ characters) in any real deployment.
 ## Layout
 
 ```
-backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, access (AccessPolicy)
-frontend/   Next.js 16: login, register, servers, channels, invite page
-docs/       authorization matrix, delivery harness, ADRs, ideas for v2
+backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access
+frontend/   Next.js 16: login, register, servers, channels (live), invite page
+harness/    delivery harness: N STOMP clients against two instances, four invariants
+nginx/      load balancer config for the two-instance cluster
+docs/       authorization matrices, delivery results, ADRs, ideas for v2
 ```
 
 ## Out of scope
