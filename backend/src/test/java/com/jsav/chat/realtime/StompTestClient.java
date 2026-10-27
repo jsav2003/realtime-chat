@@ -8,11 +8,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.messaging.converter.StringMessageConverter;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.converter.MessageConverter;
+import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
@@ -36,7 +40,7 @@ final class StompTestClient implements AutoCloseable {
 
   private StompTestClient(int port, String token) {
     client = new WebSocketStompClient(new StandardWebSocketClient());
-    client.setMessageConverter(new StringMessageConverter(StandardCharsets.UTF_8));
+    client.setMessageConverter(new AnyToString());
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setDaemon(true);
     scheduler.setThreadNamePrefix("stomp-test-");
@@ -143,6 +147,23 @@ final class StompTestClient implements AutoCloseable {
     }
   }
 
+  /** Pasa el cuerpo tal cual, sea cual sea el content-type: el test lee el JSON como texto. */
+  private static final class AnyToString implements MessageConverter {
+    @Override
+    public Object fromMessage(Message<?> message, Class<?> targetClass) {
+      Object payload = message.getPayload();
+      return payload instanceof byte[] bytes
+          ? new String(bytes, StandardCharsets.UTF_8)
+          : String.valueOf(payload);
+    }
+
+    @Override
+    public Message<?> toMessage(Object payload, MessageHeaders headers) {
+      byte[] bytes = String.valueOf(payload).getBytes(StandardCharsets.UTF_8);
+      return MessageBuilder.createMessage(bytes, headers);
+    }
+  }
+
   private final class Handler implements StompFrameHandler {
     @Override
     public Type getPayloadType(StompHeaders headers) {
@@ -170,6 +191,12 @@ final class StompTestClient implements AutoCloseable {
     @Override
     public void handleFrame(StompHeaders headers, Object payload) {
       errors.add(String.valueOf(headers.getFirst("message")));
+    }
+
+    @Override
+    public void handleException(
+        StompSession s, StompCommand command, StompHeaders headers, byte[] payload, Throwable ex) {
+      errors.add("excepción del cliente: " + ex);
     }
 
     @Override
