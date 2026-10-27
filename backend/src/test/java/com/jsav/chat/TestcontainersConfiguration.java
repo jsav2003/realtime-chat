@@ -24,6 +24,7 @@ public class TestcontainersConfiguration {
   /** RabbitMQ con el plugin STOMP, igual que el de docker-compose.yml. */
   @Bean
   @ServiceConnection
+  @SuppressWarnings("resource") // Spring cierra el contenedor al cerrar el contexto
   RabbitMQContainer rabbitContainer() {
     return new RabbitMQContainer(DockerImageName.parse("rabbitmq:4"))
         .withCopyToContainer(
