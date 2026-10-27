@@ -32,8 +32,6 @@ export default function ChannelPage() {
    * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
    */
   const messagesRef = useRef<Message[]>([]);
-  /** Ya se cargó el historial: antes de eso un seq "adelantado" no es un hueco. */
-  const loadedRef = useRef(false);
 
   /** Une mensajes a los que ya se tienen (descarta repetidos y ordena por seq). */
   const addMessages = useCallback((incoming: Message[]) => {
@@ -50,7 +48,6 @@ export default function ChannelPage() {
       .then(([c, page]) => {
         setChannel(c);
         addMessages(page.messages);
-        loadedRef.current = true;
         setHasOlder(page.hasMore);
       })
       .catch((err) => {
@@ -119,9 +116,12 @@ export default function ChannelPage() {
       onMessage: (m) => {
         const known = lastSeqOf(messagesRef.current);
         addMessages([m]);
-        if (loadedRef.current && m.seq > known + 1) void resync(known);
+        if (m.seq > known + 1) void resync(known);
       },
-      onSubscribed: () => {},
+      // Primera vez y después de cada reconexión: pedir lo que se pudo perder mientras no se
+      // estaba suscrito. Se hace recién con el RECEIPT, porque antes no hay garantía de estar
+      // recibiendo y quedaría un hueco entre este pedido y lo vivo.
+      onSubscribed: () => void resync(lastSeqOf(messagesRef.current)),
       onState: () => {},
       onRejected: () => {},
     });
