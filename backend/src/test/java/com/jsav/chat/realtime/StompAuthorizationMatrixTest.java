@@ -90,6 +90,7 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
   }
 
   static final String CHANNEL_TOPIC = "/topic/channel.{channelId}";
+  static final String TYPING_TOPIC = "/topic/channel.{channelId}.typing";
 
   static final List<Row> MATRIX =
       List.of(
@@ -126,6 +127,50 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
               "404",
               "401",
               "404"),
+          row(
+              "SUBSCRIBE",
+              TYPING_TOPIC,
+              "público",
+              Ref.GENERAL,
+              "ok",
+              "ok",
+              "ok",
+              "404",
+              "401",
+              "404"),
+          row(
+              "SUBSCRIBE",
+              TYPING_TOPIC,
+              "privado, member no está",
+              Ref.PRIVATE,
+              "ok",
+              "ok",
+              "404",
+              "404",
+              "401",
+              "404"),
+          row(
+              "SUBSCRIBE",
+              TYPING_TOPIC,
+              "privado, member sí está",
+              Ref.PRIVATE_IN,
+              "ok",
+              "ok",
+              "ok",
+              "404",
+              "401",
+              "404"),
+          row(
+              "SEND",
+              TYPING_TOPIC,
+              "público",
+              Ref.GENERAL,
+              "403",
+              "403",
+              "403",
+              "403",
+              "401",
+              "403"),
           row(
               "SUBSCRIBE",
               "/topic/channel.999999999",
@@ -199,8 +244,13 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
     MATRIX.forEach(r -> covered.add(r.key()));
     assertThat(covered)
         .as("el destino de suscripción real debe estar en la matriz, y SEND también")
-        .contains("SUBSCRIBE " + CHANNEL_TOPIC, "SEND " + CHANNEL_TOPIC);
+        .contains(
+            "SUBSCRIBE " + CHANNEL_TOPIC,
+            "SEND " + CHANNEL_TOPIC,
+            "SUBSCRIBE " + TYPING_TOPIC,
+            "SEND " + TYPING_TOPIC);
     assertThat(ChannelTopic.of(1)).matches(CHANNEL_TOPIC.replace("{channelId}", "1"));
+    assertThat(ChannelTopic.typingOf(1)).matches(TYPING_TOPIC.replace("{channelId}", "1"));
   }
 
   // ---- docs/AUTHZ.md es la misma tabla ----

@@ -25,6 +25,7 @@ public final class Ledger {
   private final List<Replay> replays = Collections.synchronizedList(new ArrayList<>());
   private final List<UUID> unconfirmed = Collections.synchronizedList(new ArrayList<>());
   private final AtomicLong retriedRequests = new AtomicLong();
+  private final AtomicLong rateLimitedRequests = new AtomicLong();
 
   /** Marca un envío como confirmado. Confirmarlo con dos seq distintos sería un fallo grave. */
   public void confirmed(UUID clientMsgId, long seq, int status) {
@@ -49,6 +50,11 @@ public final class Ledger {
     retriedRequests.incrementAndGet();
   }
 
+  /** El servidor frenó un envío con 429 (límite de mensajes): se esperó y se reintentó. */
+  public void rateLimitedRequest() {
+    rateLimitedRequests.incrementAndGet();
+  }
+
   public Map<UUID, Confirmed> confirmedSends() {
     return Map.copyOf(confirmed);
   }
@@ -67,5 +73,9 @@ public final class Ledger {
 
   public long retriedRequests() {
     return retriedRequests.get();
+  }
+
+  public long rateLimitedRequests() {
+    return rateLimitedRequests.get();
   }
 }

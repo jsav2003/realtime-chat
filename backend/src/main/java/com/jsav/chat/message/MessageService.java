@@ -7,6 +7,7 @@ import com.jsav.chat.common.ConflictException;
 import com.jsav.chat.message.MessageDtos.MessagePage;
 import com.jsav.chat.message.MessageDtos.MessageResponse;
 import com.jsav.chat.message.MessageDtos.SendMessageRequest;
+import com.jsav.chat.ratelimit.MessageRateLimiter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -36,16 +37,19 @@ public class MessageService {
   private final AccessPolicy policy;
   private final TransactionTemplate tx;
   private final ApplicationEventPublisher events;
+  private final MessageRateLimiter rateLimiter;
 
   public MessageService(
       MessageRepository messages,
       AccessPolicy policy,
       TransactionTemplate tx,
-      ApplicationEventPublisher events) {
+      ApplicationEventPublisher events,
+      MessageRateLimiter rateLimiter) {
     this.messages = messages;
     this.policy = policy;
     this.tx = tx;
     this.events = events;
+    this.rateLimiter = rateLimiter;
   }
 
   /**
@@ -75,10 +79,15 @@ public class MessageService {
       return replay(existing.get(), channelId);
     }
 
-    // 2. Reservar el seq. Desde aquí, hasta el commit, nadie más escribe en este canal.
+    // 2. Cobrar el límite. Va después de AccessPolicy (un extraño recibe 404, no 429) y del paso 1
+    // (reenviar un mensaje ya guardado no gasta cupo), y antes de reservar el seq: un 429 no deja
+    // huecos en la secuencia (ADR 0009).
+    rateLimiter.acquire(userId);
+
+    // 3. Reservar el seq. Desde aquí, hasta el commit, nadie más escribe en este canal.
     long seq = messages.nextSeq(channelId);
 
-    // 3. Guardar. Vacío = otro reintento con la misma clave entró entre el paso 1 y este.
+    // 4. Guardar. Vacío = otro reintento con la misma clave entró entre el paso 1 y este.
     Message saved =
         messages
             .insert(channelId, seq, userId, req.clientMsgId(), req.body().strip())

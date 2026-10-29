@@ -95,6 +95,35 @@ Cómo leer las columnas:
 - *Tardó en volver:* desde `docker compose restart` hasta que `/actuator/health` responde
   200. La mayor parte es el arranque de Spring Boot dentro de un contenedor.
 
+## Con el límite de mensajes (hito 5)
+
+El hito 5 agregó un límite de mensajes por usuario (ADR 0009: capacidad 20, recarga de 30 por
+minuto). El arnés manda 80 mensajes por cliente, así que con el límite por defecto **choca a
+propósito**: trata el `429` como «espera `Retry-After` y reintenta con el mismo
+`client_msg_id`», sin gastar sus 80 intentos de falla real, y lo cuenta aparte. Los reenvíos
+deliberados de mensajes ya confirmados siguen dando 200 con el bucket vacío (no gastan cupo).
+
+Mismo escenario de arriba. La primera fila sube el límite a 100 000 (variables
+`RATE_LIMIT_CAPACITY` y `RATE_LIMIT_REFILL_PER_MINUTE` del cluster) para comprobar que el
+cambio no alteró nada; las otras dos corren con el límite por defecto.
+
+| Semilla | Límite | Confirmados | Reenvíos | Frenados por 429 y reintentados | Reinicio (tardó en volver) | Vistos en vivo | Vistos por resync | Repetidos descartados | Faltaban antes del resync final | Violaciones (1/2/3/4) | Duración |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 42 | 100 000 | 640 | 85 | 0 | backend-b (62.2 s) | 4910 | 210 | 217 | 0 | 0/0/0/0 | 91.8 s |
+| 42 | 20 y 30/min | 640 | 85 | 434 | backend-b (49.0 s) | 5057 | 63 | 78 | 0 | 0/0/0/0 | 132.0 s |
+| 7 | 20 y 30/min | 640 | 101 | 446 | backend-a (35.5 s) | 5012 | 108 | 50 | 0 | 0/0/0/0 | 129.6 s |
+
+**Cero violaciones**, y con el límite por defecto 434 y 446 envíos fueron frenados, esperaron y
+se confirmaron una sola vez: los 640 envíos de cada corrida quedaron confirmados, ninguno se
+rindió y `last_seq` fue 640. Con el límite puesto, las corridas duran más (132 s y 130 s frente a
+92 s) por la espera de los clientes frenados, y la resincronización trajo menos entregas (63 y
+108 frente a 210). No se investigó por qué; una explicación posible es que los envíos llegan
+más espaciados, pero es una hipótesis, no una medición.
+
+Cuidado con qué se concluye de esto: las tres corridas son pocas y la semilla fija el plan,
+no el intercalado de hilos. Dicen que el límite no rompe la entrega en estos escenarios, no que
+no pueda hacerlo en otros.
+
 ## Lo que encontró el arnés
 
 Antes de arreglar el cliente, el arnés corrió con tres semillas. Dos pasaron y **una falló**:
@@ -138,6 +167,14 @@ compilan; el código se restauró con `git checkout` después de cada una):
 | Quitar el chequeo de `AccessPolicy` en `SUBSCRIBE` | `StompSubscribeIntegrationTest` | 3 de 9 fallan (extraño, canal inexistente, privado ajeno) |
 | Expulsar sin cerrar los sockets | `KickClosesSocketsIntegrationTest` | 2 de 3 fallan (misma instancia y otra instancia) |
 | Permitir `SEND` | `StompSendIntegrationTest` | 3 de 3 fallan |
+
+Lo mismo con las piezas del hito 5 (29/10, también restauradas con `git checkout`):
+
+| Rotura | Test que la detecta | Resultado |
+|---|---|---|
+| Token bucket ingenuo: `GET` del contador y `SET` después, en vez del script Lua | `TokenBucketConcurrencyIntegrationTest` (100 solicitudes, capacidad 20) | falla: pasan **100 en vez de 20** |
+| El cierre del socket no borra la presencia (`SessionRegistry.closed` no avisa a los oyentes) | `PresenceTrackingIntegrationTest` y `SessionRegistryTest` | fallan 5 de 6 y 3 de 10: el usuario sigue en línea tras cerrar la última pestaña, tras una expulsión y desde la otra instancia |
+| El destino `.typing` se salta `AccessPolicy` en `SUBSCRIBE` | `StompAuthorizationMatrixTest` | fallan 7 celdas (miembro de otro servidor, expulsado y member en el privado ajeno, que debían dar 404) |
 
 Del lado del arnés, lo que más se acerca a "quitar la resincronización" es la corrida de la
 semilla 2 antes del arreglo (sección anterior): con un cursor de resincronización

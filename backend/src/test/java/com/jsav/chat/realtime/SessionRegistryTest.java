@@ -9,13 +9,29 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 class SessionRegistryTest {
 
-  private final SessionRegistry registry = new SessionRegistry();
+  private final List<String> events = new ArrayList<>();
+  private final SessionRegistry registry =
+      new SessionRegistry(
+          List.of(
+              new ConnectionListener() {
+                @Override
+                public void connected(String sessionId, Long userId) {
+                  events.add("+" + sessionId + ":" + userId);
+                }
+
+                @Override
+                public void disconnected(String sessionId, Long userId) {
+                  events.add("-" + sessionId + ":" + userId);
+                }
+              }));
 
   private WebSocketSession socket(String id) {
     WebSocketSession s = mock(WebSocketSession.class);
@@ -68,6 +84,82 @@ class SessionRegistryTest {
 
     assertThat(registry.openSockets()).isZero();
     assertThat(registry.closeSocketsOf(7L)).isZero();
+  }
+
+  @Test
+  void listenersHearEachAuthenticatedSessionOpenAndClose() {
+    socket("a");
+    registry.bind("a", 7L);
+    registry.closed("a");
+
+    assertThat(events).containsExactly("+a:7", "-a:7");
+  }
+
+  @Test
+  void aSocketThatNeverAuthenticatedIsNotAnnouncedWhenItCloses() {
+    socket("a");
+
+    registry.closed("a");
+
+    assertThat(events).isEmpty();
+  }
+
+  @Test
+  void aSecondCloseOfTheSameSessionIsNotAnnouncedTwice() {
+    socket("a");
+    registry.bind("a", 7L);
+
+    registry.closed("a");
+    registry.closed("a");
+
+    assertThat(events).containsExactly("+a:7", "-a:7");
+  }
+
+  @Test
+  void aFailingListenerDoesNotBreakTheRegistryNorTheOtherListeners() {
+    List<String> heard = new ArrayList<>();
+    SessionRegistry guarded =
+        new SessionRegistry(
+            List.of(
+                new ConnectionListener() {
+                  @Override
+                  public void connected(String sessionId, Long userId) {
+                    throw new IllegalStateException("se cayó");
+                  }
+
+                  @Override
+                  public void disconnected(String sessionId, Long userId) {
+                    throw new IllegalStateException("se cayó");
+                  }
+                },
+                new ConnectionListener() {
+                  @Override
+                  public void connected(String sessionId, Long userId) {
+                    heard.add("+");
+                  }
+
+                  @Override
+                  public void disconnected(String sessionId, Long userId) {
+                    heard.add("-");
+                  }
+                }));
+
+    guarded.bind("a", 7L);
+    guarded.closed("a");
+
+    assertThat(heard).containsExactly("+", "-");
+    assertThat(guarded.isBound("a")).isFalse();
+  }
+
+  @Test
+  void boundSessionsListsOnlyTheAuthenticatedOnes() {
+    socket("a");
+    socket("b");
+    registry.bind("a", 7L);
+
+    assertThat(registry.boundSessions()).containsExactly(java.util.Map.entry("a", 7L));
+    assertThat(registry.isBound("a")).isTrue();
+    assertThat(registry.isBound("b")).isFalse();
   }
 
   @Test

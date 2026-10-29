@@ -19,12 +19,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 
@@ -48,6 +50,12 @@ abstract class RealtimeIntegrationTest {
   @Autowired JwtService jwt;
   @Autowired PostgreSQLContainer postgres;
   @Autowired RabbitMQContainer rabbit;
+
+  // Hay tres GenericContainer en el contexto: por tipo solo no se sabe cuál es el de Redis.
+  @Autowired
+  @Qualifier("redisContainer")
+  GenericContainer<?> redis;
+
   @Autowired Environment env;
 
   User owner;
@@ -94,6 +102,8 @@ abstract class RealtimeIntegrationTest {
                   "--spring.datasource.url=" + postgres.getJdbcUrl(),
                   "--spring.datasource.username=" + postgres.getUsername(),
                   "--spring.datasource.password=" + postgres.getPassword(),
+                  "--spring.data.redis.host=" + redis.getHost(),
+                  "--spring.data.redis.port=" + redis.getMappedPort(6379),
                   "--spring.rabbitmq.host=" + rabbit.getHost(),
                   "--spring.rabbitmq.port=" + rabbit.getAmqpPort(),
                   "--spring.rabbitmq.username=" + rabbit.getAdminUsername(),

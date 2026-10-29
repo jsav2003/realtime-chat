@@ -30,6 +30,7 @@ public final class Report {
     row(md, "Envíos que se rindieron sin confirmación", r.unconfirmedSends());
     row(md, "Reenvíos de mensajes ya confirmados (mismo `client_msg_id`)", r.forcedResends());
     row(md, "Solicitudes reintentadas por fallas (red, 5xx)", r.retriedRequests());
+    row(md, "Envíos frenados por el límite de mensajes (429) y reintentados", r.rateLimitedRequests());
     row(md, "Desconexiones inyectadas", r.disconnectsInjected());
     row(md, "Reinicio de instancia", restartText(r));
     row(md, "Mensajes en el servidor / `last_seq`", r.serverMessages() + " / " + r.lastSeq());

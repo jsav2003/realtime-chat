@@ -32,9 +32,17 @@ public final class ApiClient {
   public static final class ApiException extends RuntimeException {
     public final int status;
 
+    /** Lo que pidió el servidor en {@code Retry-After}, en segundos; 0 si no mandó el header. */
+    public final long retryAfterSeconds;
+
     ApiException(int status, String body) {
+      this(status, body, 0);
+    }
+
+    ApiException(int status, String body, long retryAfterSeconds) {
       super("HTTP " + status + ": " + body);
       this.status = status;
+      this.retryAfterSeconds = retryAfterSeconds;
     }
   }
 
@@ -89,9 +97,23 @@ public final class ApiClient {
                         "{\"clientMsgId\":\"%s\",\"body\":\"%s\"}".formatted(clientMsgId, body)))
                 .build());
     if (res.statusCode() != 200 && res.statusCode() != 201) {
-      throw new ApiException(res.statusCode(), res.body());
+      throw new ApiException(res.statusCode(), res.body(), retryAfterSeconds(res));
     }
     return new SendResult(res.statusCode(), parse(res.body()));
+  }
+
+  private static long retryAfterSeconds(HttpResponse<?> res) {
+    return res.headers()
+        .firstValue("Retry-After")
+        .map(
+            v -> {
+              try {
+                return Long.parseLong(v.trim());
+              } catch (NumberFormatException e) {
+                return 0L;
+              }
+            })
+        .orElse(0L);
   }
 
   /** Todo lo posterior a {@code afterSeq}, página por página. */

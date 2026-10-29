@@ -3,9 +3,18 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, Channel, Message, api, clearToken, getToken } from "@/lib/api";
+import {
+  ApiError,
+  Channel,
+  Message,
+  api,
+  clearToken,
+  getToken,
+  getUserId,
+} from "@/lib/api";
 import { contiguousSeqOf, lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
+import { MemberList } from "../../members";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   connecting: "Conectando…",
@@ -14,6 +23,22 @@ const CONNECTION_LABELS: Record<ConnectionState, string> = {
     "Sin conexión en vivo; reconectando… (puedes seguir usando «Buscar nuevos»)",
   closed: "Sin conexión en vivo",
 };
+
+/** Cuánto dura el «escribiendo…» sin un aviso nuevo (el compositor avisa cada ~2 s). */
+const TYPING_VISIBLE_MS = 4000;
+
+/** Mínimo entre avisos de «escribiendo…» al servidor; él también los frena. */
+const TYPING_NOTICE_EVERY_MS = 2000;
+
+type Typers = Record<number, { name: string; at: number }>;
+
+/** «Ana está escribiendo…», «Ana y Beto están escribiendo…» o «Varias personas…». */
+function typingText(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return `${names[0]} está escribiendo…`;
+  if (names.length === 2) return `${names[0]} y ${names[1]} están escribiendo…`;
+  return "Varias personas están escribiendo…";
+}
 
 export default function ChannelPage() {
   const router = useRouter();
@@ -36,6 +61,11 @@ export default function ChannelPage() {
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
+  /** Quién está escribiendo ahora, con la hora del último aviso (ver `TYPING_VISIBLE_MS`). */
+  const [typers, setTypers] = useState<Typers>({});
+  /** Segundos que el servidor pidió esperar (429); `null` si no se está esperando. */
+  const [rateLimitWait, setRateLimitWait] = useState<number | null>(null);
+  const lastTypingNoticeAt = useRef(0);
   /**
    * Los mensajes que se tienen, siempre al día. Los eventos del WebSocket llegan fuera del render
    * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
@@ -126,6 +156,21 @@ export default function ChannelPage() {
         const known = contiguousSeqOf(messagesRef.current);
         addMessages([m]);
         if (m.seq > known + 1) void resync(known);
+        // Quien acaba de enviar un mensaje ya no está «escribiendo».
+        setTypers((prev) => {
+          if (!(m.authorId in prev)) return prev;
+          const rest = { ...prev };
+          delete rest[m.authorId];
+          return rest;
+        });
+      },
+      onTyping: (t) => {
+        // El propio aviso no se muestra; el servidor no lo filtra porque es solo interfaz.
+        if (t.userId === getUserId()) return;
+        setTypers((prev) => ({
+          ...prev,
+          [t.userId]: { name: t.displayName, at: Date.now() },
+        }));
       },
       // Primera vez y después de cada reconexión: pedir lo que se pudo perder mientras no se
       // estaba suscrito. Se hace recién con el RECEIPT, porque antes no hay garantía de estar
@@ -146,6 +191,33 @@ export default function ChannelPage() {
     });
   }, [channel, channelId, addMessages, resync, router]);
 
+  /** Quita de «escribiendo…» a quien lleva un rato sin avisar (cada segundo). */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTypers((prev) => {
+        const now = Date.now();
+        const alive = Object.entries(prev).filter(
+          ([, t]) => now - t.at < TYPING_VISIBLE_MS,
+        );
+        return alive.length === Object.keys(prev).length
+          ? prev
+          : Object.fromEntries(alive);
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  /**
+   * Avisa que el usuario está escribiendo, como mucho una vez cada `TYPING_NOTICE_EVERY_MS`. Si
+   * falla no pasa nada: es un adorno, y el siguiente tecleo lo vuelve a intentar.
+   */
+  function noticeTyping() {
+    const now = Date.now();
+    if (now - lastTypingNoticeAt.current < TYPING_NOTICE_EVERY_MS) return;
+    lastTypingNoticeAt.current = now;
+    api.sendTyping(channelId).catch(() => {});
+  }
+
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const body = draft.trim();
@@ -154,7 +226,7 @@ export default function ChannelPage() {
     const known = contiguousSeqOf(messagesRef.current);
     setSending(true);
     try {
-      const sent = await sendWithRetry(channelId, key, body);
+      const sent = await sendWithRetry(channelId, key, body, setRateLimitWait);
       addMessages([sent]);
       setDraft("");
       setFailedKey(null);
@@ -171,6 +243,7 @@ export default function ChannelPage() {
       );
     } finally {
       setSending(false);
+      setRateLimitWait(null);
     }
   }
 
@@ -226,12 +299,26 @@ export default function ChannelPage() {
         </button>
       </p>
 
+      <p
+        aria-live="polite"
+        data-testid="typing-indicator"
+        style={{ margin: "0 0 0.25rem", minHeight: "1.25rem", opacity: 0.7 }}
+      >
+        <small>{typingText(Object.values(typers).map((t) => t.name))}</small>
+      </p>
+      {rateLimitWait !== null && (
+        <p role="status" data-testid="rate-limit-notice">
+          Vas muy rápido: el mensaje se enviará en unos {rateLimitWait} s.
+        </p>
+      )}
+
       <form onSubmit={onSend} style={{ display: "flex", gap: "0.5rem" }}>
         <input
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value);
             setFailedKey(null);
+            if (e.target.value.trim()) noticeTyping();
           }}
           placeholder={`Escribe en #${channel?.name ?? ""}`}
           maxLength={4000}
@@ -242,6 +329,8 @@ export default function ChannelPage() {
           {sending ? "Enviando…" : "Enviar"}
         </button>
       </form>
+
+      {channel && <MemberList serverId={serverId} />}
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import { Client } from "@stomp/stompjs";
-import { getToken, type Message } from "./api";
+import { getToken, type Message, type TypingEvent } from "./api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws";
 
@@ -11,6 +11,8 @@ export type ConnectionState = "connecting" | "live" | "reconnecting" | "closed";
 export type ChannelSocketHandlers = {
   /** Llegó un mensaje en vivo. Puede venir repetido o con un hueco: lo resuelve quien lo reciba. */
   onMessage: (message: Message) => void;
+  /** Alguien está escribiendo en el canal. Efímero: no se guarda ni se resincroniza. */
+  onTyping?: (event: TypingEvent) => void;
   /**
    * El servidor confirmó la suscripción (RECEIPT), la primera vez y después de cada reconexión.
    * Es el momento de pedir por HTTP lo que se pudo perder: antes de esto no hay garantía de
@@ -38,7 +40,8 @@ export function parseErrorHeader(header: string | undefined): {
 }
 
 /**
- * Abre un WebSocket STOMP y se suscribe a `/topic/channel.{id}`. El JWT va en el frame CONNECT
+ * Abre un WebSocket STOMP y se suscribe a `/topic/channel.{id}` (mensajes) y a
+ * `/topic/channel.{id}.typing` (quién está escribiendo). El JWT va en el frame CONNECT
  * (el navegador no puede ponerlo en el handshake). Reconecta solo; en cada reconexión vuelve a
  * leer el token y a suscribirse. Devuelve la función que lo cierra.
  */
@@ -65,6 +68,11 @@ export function openChannelSocket(
         `/topic/channel.${channelId}`,
         (frame) => handlers.onMessage(JSON.parse(frame.body) as Message),
         { receipt },
+      );
+      // Después de la suscripción a los mensajes, que es la que lleva el receipt y dispara el
+      // resync. Si esta falla, lo hace por la misma razón que la otra y el ERROR es el mismo.
+      client.subscribe(`/topic/channel.${channelId}.typing`, (frame) =>
+        handlers.onTyping?.(JSON.parse(frame.body) as TypingEvent),
       );
     },
     onStompError: (frame) => {

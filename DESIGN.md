@@ -152,11 +152,23 @@ servidor.
 menos una conexión viva en cualquier instancia. Cada conexión escribe en Redis una clave
 con TTL que se renueva con cada heartbeat. Si la pestaña se cierra sin avisar, la clave
 vence sola. "En línea" es "existe al menos una clave".
+*Implementación (ADR 0008):* en vez de una clave por conexión, un ZSET por usuario con un
+miembro por conexión y como puntaje su vencimiento, para saber quién está en línea sin un
+`SCAN`. Cada instancia renueva sus conexiones cada 15 s con un vencimiento de 45 s, y la
+interfaz **consulta** `GET /servers/{id}/presence` cada 20 s en vez de recibir avisos.
+
+**«Escribiendo…».** Un aviso efímero: no se guarda, no lleva `seq` y queda fuera de las
+garantías de entrega. Entra por `POST /channels/{id}/typing` (STOMP sigue sin aceptar `SEND`,
+ADR 0006), sale por `/topic/channel.{id}.typing` y el servidor lo frena a uno cada 2 s por
+usuario y canal (ADR 0010).
 
 **Rate limiting.** Un límite de mensajes por minuto por usuario, con token bucket en
 Redis. La versión ingenua lee el contador, decide y escribe en dos pasos, y bajo
 concurrencia deja pasar más de lo permitido. La versión correcta hace todo en un solo
 script Lua, que Redis ejecuta de forma atómica.
+*Implementación (ADR 0009):* capacidad 20 y recarga de 30 por minuto. Se cobra solo al mensaje
+nuevo (un extraño recibe 404, un reintento de un mensaje guardado recibe 200 sin gastar cupo, y
+un 429 no reserva `seq`), responde 429 con `Retry-After` y, si Redis cae, deja pasar.
 
 **Notificaciones de menciones.** Un `@usuario` genera una notificación que procesa un
 worker aparte por RabbitMQ. Si el mensaje se guarda y el evento se pierde antes de llegar
@@ -270,7 +282,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 2 · Canales, invitaciones y permisos | 14 | `AccessPolicy` en cada endpoint; invitaciones por link; matriz de autorización HTTP en verde |
 | 3 · Mensajes | 14 | `seq` por canal, `client_msg_id`, paginación por cursor; test de 50 envíos simultáneos en verde |
 | 4 · Tiempo real | 20 | STOMP con relay a RabbitMQ, dos instancias, resincronización por `seq`, autorización en `SUBSCRIBE` (y `SEND` rechazado); **arnés de entrega en verde** (hecho, ver `docs/DELIVERY.md`) |
-| 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico |
+| 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico (hecho, ver ADR 0008 a 0010) |
 | 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde |
 | 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño |
 | 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` |

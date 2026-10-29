@@ -20,6 +20,9 @@ public final class Sender implements Runnable {
   }
 
   static final int MAX_ATTEMPTS = 80;
+
+  /** Con esperas de 1 s o más, unos 10 minutos; pasado eso el límite no se va a levantar. */
+  static final int MAX_RATE_LIMITED_RETRIES = 600;
   static final long RETRY_PAUSE_MILLIS = 250;
 
   private final List<Send> plan;
@@ -62,12 +65,26 @@ public final class Sender implements Runnable {
     }
   }
 
-  /** {@code null} si se rindió: un 4xx no se reintenta porque no va a cambiar. */
+  /**
+   * {@code null} si se rindió: un 4xx no se reintenta porque no va a cambiar. La excepción es el
+   * 429: el límite de mensajes (ADR 0009) no es una falla, es «espera y vuelve». Se espera lo que
+   * pide {@code Retry-After} y se reintenta con el mismo {@code clientMsgId}, sin gastar intentos.
+   */
   private SendResult sendWithRetry(Send send) {
-    for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    int rateLimited = 0;
+    int attempt = 1;
+    while (attempt <= MAX_ATTEMPTS) {
       try {
         return call.send(send.clientMsgId(), send.body());
       } catch (ApiException e) {
+        if (e.status == 429) {
+          if (++rateLimited > MAX_RATE_LIMITED_RETRIES) {
+            return null;
+          }
+          ledger.rateLimitedRequest();
+          pause(e.retryAfterSeconds > 0 ? e.retryAfterSeconds * 1000 : retryPauseMillis);
+          continue;
+        }
         if (e.status < 500) {
           return null;
         }
@@ -76,6 +93,7 @@ public final class Sender implements Runnable {
       }
       ledger.retriedRequest();
       pause(retryPauseMillis);
+      attempt++;
     }
     return null;
   }

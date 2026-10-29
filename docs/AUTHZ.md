@@ -54,6 +54,7 @@ válido.
 | `POST /servers` | — | 201 | 201 | 201 | 201 | 401 | 201 |
 | `GET /servers/{serverId}` | — | 200 | 200 | 200 | 404 | 401 | 404 |
 | `GET /servers/{serverId}/members` | — | 200 | 200 | 200 | 404 | 401 | 404 |
+| `GET /servers/{serverId}/presence` | — | 200 | 200 | 200 | 404 | 401 | 404 |
 | `PUT /servers/{serverId}/members/{userId}/role` | cambiar a un member | 200 | 403 | 403 | 404 | 401 | 404 |
 | `DELETE /servers/{serverId}/members/{userId}` | expulsar a un member | 204 | 204 | 403 | 404 | 401 | 404 |
 | `GET /servers/{serverId}/channels` | — | 200 | 200 | 200 | 404 | 401 | 404 |
@@ -71,6 +72,9 @@ válido.
 | `GET /channels/{channelId}/messages` | público | 200 | 200 | 200 | 404 | 401 | 404 |
 | `GET /channels/{channelId}/messages` | privado, member no está | 200 | 200 | 404 | 404 | 401 | 404 |
 | `GET /channels/{channelId}/messages` | privado, member sí está | 200 | 200 | 200 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/typing` | público | 204 | 204 | 204 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/typing` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/typing` | privado, member sí está | 204 | 204 | 204 | 404 | 401 | 404 |
 | `POST /servers/{serverId}/invites` | — | 201 | 201 | 403 | 404 | 401 | 404 |
 | `GET /invites/{code}` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
 | `POST /invites/{code}/accept` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
@@ -103,6 +107,10 @@ regenerarla: `./mvnw test -Dtest=StompAuthorizationMatrixTest -Dauthz.update=tru
 | `SUBSCRIBE /topic/channel.{channelId}` | público | ok | ok | ok | 404 | 401 | 404 |
 | `SUBSCRIBE /topic/channel.{channelId}` | privado, member no está | ok | ok | 404 | 404 | 401 | 404 |
 | `SUBSCRIBE /topic/channel.{channelId}` | privado, member sí está | ok | ok | ok | 404 | 401 | 404 |
+| `SUBSCRIBE /topic/channel.{channelId}.typing` | público | ok | ok | ok | 404 | 401 | 404 |
+| `SUBSCRIBE /topic/channel.{channelId}.typing` | privado, member no está | ok | ok | 404 | 404 | 401 | 404 |
+| `SUBSCRIBE /topic/channel.{channelId}.typing` | privado, member sí está | ok | ok | ok | 404 | 401 | 404 |
+| `SEND /topic/channel.{channelId}.typing` | público | 403 | 403 | 403 | 403 | 401 | 403 |
 | `SUBSCRIBE /topic/channel.999999999` | canal que no existe | 404 | 404 | 404 | 404 | 401 | 404 |
 | `SUBSCRIBE /topic/other` | destino que no es de un canal | 404 | 404 | 404 | 404 | 401 | 404 |
 | `SEND /topic/channel.{channelId}` | público | 403 | 403 | 403 | 403 | 401 | 403 |

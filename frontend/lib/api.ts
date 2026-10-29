@@ -9,7 +9,11 @@ export type ApiErrorBody = {
 };
 
 export class ApiError extends Error {
-  constructor(public body: ApiErrorBody) {
+  constructor(
+    public body: ApiErrorBody,
+    /** Lo que pidió el servidor en `Retry-After` (429), en segundos; 0 si no lo mandó. */
+    public retryAfterSeconds = 0,
+  ) {
     super(body.message);
   }
 }
@@ -42,6 +46,14 @@ export type Invite = {
 
 export type InvitePreview = { code: string; serverName: string };
 
+export type Member = { userId: number; displayName: string; role: Role };
+
+/** Los ids de los miembros del servidor con alguna conexión viva. */
+export type Presence = { online: number[] };
+
+/** Quién está escribiendo en un canal. Es efímero: no se guarda ni tiene seq. */
+export type TypingEvent = { userId: number; displayName: string };
+
 export type Message = {
   id: number;
   channelId: number;
@@ -66,6 +78,22 @@ export const getToken = () =>
 export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token);
 
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+/**
+ * El id del usuario según el token (su `sub`). Solo sirve para la interfaz, por ejemplo para no
+ * mostrarte tu propio «escribiendo…»: el servidor nunca confía en esto.
+ */
+export function getUserId(): number | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const sub = (JSON.parse(atob(payload)) as { sub?: string }).sub;
+    return sub ? Number(sub) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Adónde volver después de iniciar sesión (por ejemplo, al abrir un link de invitación). */
 export const setNext = (path: string) => sessionStorage.setItem(NEXT_KEY, path);
@@ -96,6 +124,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         message: "Algo salió mal",
         fields: {},
       },
+      Number(res.headers.get("Retry-After")) || 0,
     );
   }
   if (res.status === 204) return undefined as T;
@@ -126,6 +155,12 @@ export const api = {
   createInvite: (serverId: number) =>
     request<Invite>(`/servers/${serverId}/invites`, { method: "POST", body: "{}" }),
   getChannel: (channelId: number) => request<Channel>(`/channels/${channelId}`),
+  listMembers: (serverId: number) => request<Member[]>(`/servers/${serverId}/members`),
+  /** 503 si Redis no está: la interfaz simplemente no pinta los puntos. */
+  getPresence: (serverId: number) => request<Presence>(`/servers/${serverId}/presence`),
+  /** Avisa que el usuario está escribiendo. El servidor frena los avisos seguidos. */
+  sendTyping: (channelId: number) =>
+    request<void>(`/channels/${channelId}/typing`, { method: "POST" }),
   /**
    * El mismo clientMsgId en cada reintento: el backend lo reconoce y devuelve el mensaje ya
    * guardado (200) en vez de crear otro (201).

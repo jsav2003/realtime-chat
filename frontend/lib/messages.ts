@@ -34,22 +34,47 @@ export function contiguousSeqOf(messages: Message[]): number {
 const RETRY_DELAYS_MS = [500, 1500];
 
 /**
+ * Cuántas veces seguidas se espera un 429 antes de rendirse y mostrar el error. Con el límite por
+ * defecto (30 por minuto) cada espera es de unos 2 s, así que alcanza para más de un minuto.
+ */
+const MAX_RATE_LIMIT_WAITS = 30;
+
+/** Aunque el servidor pida esperar más, no se deja la pantalla colgada tanto tiempo. */
+const MAX_RATE_LIMIT_WAIT_S = 60;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
  * Envía un mensaje y, si se pierde la red o el servidor falla (5xx), lo reintenta con el mismo
  * clientMsgId. Si el primer intento sí se guardó y solo se perdió la respuesta, el reintento
  * recibe el mismo mensaje en vez de crear uno nuevo. Un 4xx no se reintenta: no va a cambiar.
+ *
+ * La excepción es el 429 (límite de mensajes, ADR 0009): no es una falla sino «espera y vuelve».
+ * Se espera lo que pide `Retry-After`, se avisa con `onRateLimited(segundos)` para que la pantalla
+ * lo muestre, y se reintenta con el mismo clientMsgId sin gastar los reintentos de arriba.
  */
 export async function sendWithRetry(
   channelId: number,
   clientMsgId: string,
   body: string,
+  onRateLimited?: (waitSeconds: number) => void,
 ): Promise<Message> {
-  for (let attempt = 0; ; attempt++) {
+  let failures = 0;
+  let rateLimited = 0;
+  for (;;) {
     try {
       return await api.sendMessage(channelId, clientMsgId, body);
     } catch (err) {
+      if (err instanceof ApiError && err.body.status === 429) {
+        if (++rateLimited > MAX_RATE_LIMIT_WAITS) throw err;
+        const wait = Math.min(Math.max(err.retryAfterSeconds, 1), MAX_RATE_LIMIT_WAIT_S);
+        onRateLimited?.(wait);
+        await sleep(wait * 1000);
+        continue;
+      }
       const retryable = !(err instanceof ApiError) || err.body.status >= 500;
-      if (!retryable || attempt >= RETRY_DELAYS_MS.length) throw err;
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      if (!retryable || failures >= RETRY_DELAYS_MS.length) throw err;
+      await sleep(RETRY_DELAYS_MS[failures++]);
     }
   }
 }

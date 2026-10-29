@@ -17,6 +17,7 @@ class ReportTest {
         0,
         70,
         12,
+        5,
         12,
         restarted,
         8_200,
