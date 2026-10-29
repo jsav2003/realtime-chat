@@ -24,6 +24,9 @@ public interface ServerMemberRepository extends JpaRepository<ServerMember, Serv
       """)
   List<MemberView> findMembers(Long serverId);
 
+  @Query("select m.id.userId from ServerMember m where m.id.serverId = :serverId")
+  List<Long> findUserIds(Long serverId);
+
   @Modifying
   @Query("delete from ServerMember m where m.id.serverId = :serverId and m.id.userId = :userId")
   int deleteMember(Long serverId, Long userId);

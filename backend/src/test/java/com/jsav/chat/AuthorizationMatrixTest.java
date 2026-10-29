@@ -167,6 +167,18 @@ class AuthorizationMatrixTest {
               401,
               404),
           row(
+              "GET",
+              "/servers/{serverId}/presence",
+              "—",
+              SERVER,
+              null,
+              200,
+              200,
+              200,
+              404,
+              401,
+              404),
+          row(
               "PUT",
               "/servers/{serverId}/members/{userId}/role",
               "cambiar a un member",

@@ -47,6 +47,11 @@ public class GlobalExceptionHandler {
     return build(HttpStatus.CONFLICT, "conflict", e.getMessage());
   }
 
+  @ExceptionHandler(ServiceUnavailableException.class)
+  ResponseEntity<ApiError> serviceUnavailable(ServiceUnavailableException e) {
+    return build(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable", e.getMessage());
+  }
+
   @ExceptionHandler(TooManyRequestsException.class)
   ResponseEntity<ApiError> tooManyRequests(TooManyRequestsException e) {
     return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)

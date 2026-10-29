@@ -54,6 +54,7 @@ válido.
 | `POST /servers` | — | 201 | 201 | 201 | 201 | 401 | 201 |
 | `GET /servers/{serverId}` | — | 200 | 200 | 200 | 404 | 401 | 404 |
 | `GET /servers/{serverId}/members` | — | 200 | 200 | 200 | 404 | 401 | 404 |
+| `GET /servers/{serverId}/presence` | — | 200 | 200 | 200 | 404 | 401 | 404 |
 | `PUT /servers/{serverId}/members/{userId}/role` | cambiar a un member | 200 | 403 | 403 | 404 | 401 | 404 |
 | `DELETE /servers/{serverId}/members/{userId}` | expulsar a un member | 204 | 204 | 403 | 404 | 401 | 404 |
 | `GET /servers/{serverId}/channels` | — | 200 | 200 | 200 | 404 | 401 | 404 |
