@@ -1,7 +1,7 @@
 package com.jsav.chat.ratelimit;
 
+import com.jsav.chat.common.RedisScripts;
 import java.util.List;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -21,7 +21,8 @@ public class TokenBucket {
    */
   public record Decision(boolean allowed, long retryAfterMs) {}
 
-  private static final DefaultRedisScript<List<Long>> SCRIPT = loadScript();
+  private static final DefaultRedisScript<List<Long>> SCRIPT =
+      RedisScripts.listOfLongs("ratelimit/token_bucket.lua");
 
   private final StringRedisTemplate redis;
 
@@ -38,13 +39,5 @@ public class TokenBucket {
       throw new IllegalStateException("Respuesta inesperada del script del token bucket");
     }
     return new Decision(result.get(0) == 1L, result.get(1));
-  }
-
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  private static DefaultRedisScript<List<Long>> loadScript() {
-    DefaultRedisScript<List<Long>> script = new DefaultRedisScript<>();
-    script.setLocation(new ClassPathResource("ratelimit/token_bucket.lua"));
-    script.setResultType((Class) List.class);
-    return script;
   }
 }

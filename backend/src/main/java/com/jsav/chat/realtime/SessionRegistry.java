@@ -2,6 +2,7 @@ package com.jsav.chat.realtime;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
@@ -23,6 +24,11 @@ public class SessionRegistry {
 
   private final ConcurrentMap<String, WebSocketSession> sockets = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Long> owners = new ConcurrentHashMap<>();
+  private final List<ConnectionListener> listeners;
+
+  public SessionRegistry(List<ConnectionListener> listeners) {
+    this.listeners = List.copyOf(listeners);
+  }
 
   /** Un socket se abrió; todavía no se sabe de quién es (eso llega con el CONNECT). */
   void opened(WebSocketSession socket) {
@@ -32,12 +38,38 @@ public class SessionRegistry {
   /** El socket se cerró, por quien sea: se olvida junto con su dueño. */
   void closed(String sessionId) {
     sockets.remove(sessionId);
-    owners.remove(sessionId);
+    Long userId = owners.remove(sessionId);
+    if (userId != null) {
+      for (ConnectionListener listener : listeners) {
+        try {
+          listener.disconnected(sessionId, userId);
+        } catch (RuntimeException e) {
+          log.warn("Un oyente falló al cerrarse la sesión {}", sessionId, e);
+        }
+      }
+    }
   }
 
   /** El CONNECT autenticó a {@code userId} en esta sesión. */
   void bind(String sessionId, Long userId) {
     owners.put(sessionId, userId);
+    for (ConnectionListener listener : listeners) {
+      try {
+        listener.connected(sessionId, userId);
+      } catch (RuntimeException e) {
+        log.warn("Un oyente falló al autenticarse la sesión {}", sessionId, e);
+      }
+    }
+  }
+
+  /** Las sesiones autenticadas de esta instancia y su dueño, en el momento de la llamada. */
+  public Map<String, Long> boundSessions() {
+    return Map.copyOf(owners);
+  }
+
+  /** Si la sesión sigue abierta y autenticada en esta instancia. */
+  public boolean isBound(String sessionId) {
+    return owners.containsKey(sessionId);
   }
 
   /** Los sockets abiertos de {@code userId} en esta instancia. */

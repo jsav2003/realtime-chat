@@ -1,6 +1,5 @@
 package com.jsav.chat.realtime;
 
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.AmqpException;
@@ -27,14 +26,15 @@ public class ControlChannel {
   private static final Logger log = LoggerFactory.getLogger(ControlChannel.class);
 
   /** Identifica a esta instancia en los avisos que publica, para no reaccionar a su propio eco. */
-  private final String instanceId = UUID.randomUUID().toString();
+  private final String instanceId;
 
   private final RabbitTemplate rabbit;
   private final SessionRegistry sessions;
 
-  public ControlChannel(RabbitTemplate rabbit, SessionRegistry sessions) {
+  public ControlChannel(RabbitTemplate rabbit, SessionRegistry sessions, InstanceId instance) {
     this.rabbit = rabbit;
     this.sessions = sessions;
+    this.instanceId = instance.value();
   }
 
   /**
