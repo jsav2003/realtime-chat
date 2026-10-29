@@ -103,6 +103,62 @@ class SenderTest {
   }
 
   @Test
+  void a429IsWaitedOut_andRetriedWithTheSameClientMsgId() {
+    FakeServer server = new FakeServer();
+    AtomicInteger limited = new AtomicInteger(3);
+    Sender.SendCall limiter =
+        (id, body) -> {
+          if (limited.getAndDecrement() > 0) {
+            throw new ApiClient.ApiException(429, "muy rápido", 0);
+          }
+          return server.send(id, body);
+        };
+
+    new Sender(List.of(send(0, false)), limiter, ledger, progress, 0).run();
+
+    assertThat(ledger.confirmedSends()).hasSize(1);
+    assertThat(ledger.rateLimitedRequests()).isEqualTo(3);
+    // Un 429 no es una falla: no cuenta como solicitud reintentada.
+    assertThat(ledger.retriedRequests()).isZero();
+    assertThat(server.seqs).hasSize(1);
+  }
+
+  @Test
+  void a429DoesNotSpendTheAttemptsMeantForRealFailures() {
+    AtomicInteger calls = new AtomicInteger();
+    FakeServer server = new FakeServer();
+    // Más 429 que MAX_ATTEMPTS: si gastaran intentos, el envío se rendiría antes de lograrse.
+    int limits = Sender.MAX_ATTEMPTS + 20;
+    Sender.SendCall limiter =
+        (id, body) -> {
+          if (calls.incrementAndGet() <= limits) {
+            throw new ApiClient.ApiException(429, "muy rápido", 0);
+          }
+          return server.send(id, body);
+        };
+
+    new Sender(List.of(send(0, false)), limiter, ledger, progress, 0).run();
+
+    assertThat(ledger.confirmedSends()).hasSize(1);
+    assertThat(ledger.unconfirmed()).isEmpty();
+  }
+
+  @Test
+  void aLimitThatNeverLiftsEventuallyGivesUp() {
+    AtomicInteger calls = new AtomicInteger();
+    Sender.SendCall stuck =
+        (id, body) -> {
+          calls.incrementAndGet();
+          throw new ApiClient.ApiException(429, "muy rápido", 0);
+        };
+
+    new Sender(List.of(send(0, false)), stuck, ledger, progress, 0).run();
+
+    assertThat(calls.get()).isEqualTo(Sender.MAX_RATE_LIMITED_RETRIES + 1);
+    assertThat(ledger.unconfirmed()).hasSize(1);
+  }
+
+  @Test
   void aForcedResendIsRecorded_andReturnsTheSameSeq() {
     FakeServer server = new FakeServer();
 

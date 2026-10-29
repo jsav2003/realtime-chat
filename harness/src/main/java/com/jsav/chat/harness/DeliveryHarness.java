@@ -111,6 +111,7 @@ public final class DeliveryHarness {
             ledger.unconfirmed().size(),
             ledger.replays().size(),
             ledger.retriedRequests(),
+            ledger.rateLimitedRequests(),
             chaos.disconnectsInjected(),
             chaos.restartedInstance(),
             chaos.restartMillis(),

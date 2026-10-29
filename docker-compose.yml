@@ -62,6 +62,9 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      # Límite de mensajes por usuario (ADR 0009). Súbelos para corridas largas del arnés.
+      RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-20}
+      RATE_LIMIT_REFILL_PER_MINUTE: ${RATE_LIMIT_REFILL_PER_MINUTE:-30}
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       postgres:

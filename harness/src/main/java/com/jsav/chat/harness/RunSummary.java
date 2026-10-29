@@ -12,6 +12,7 @@ public record RunSummary(
     int unconfirmedSends,
     long forcedResends,
     long retriedRequests,
+    long rateLimitedRequests,
     int disconnectsInjected,
     Instance restartedInstance,
     long restartMillis,
