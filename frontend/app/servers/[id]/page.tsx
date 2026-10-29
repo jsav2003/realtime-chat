@@ -12,6 +12,7 @@ import {
   clearToken,
   getToken,
 } from "@/lib/api";
+import { MemberList } from "./members";
 
 export default function ServerPage() {
   const router = useRouter();
@@ -103,6 +104,8 @@ export default function ServerPage() {
           </li>
         ))}
       </ul>
+
+      {server && <MemberList serverId={serverId} />}
 
       {canAdmin && (
         <>

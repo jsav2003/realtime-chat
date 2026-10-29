@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { contiguousSeqOf, lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
+import { MemberList } from "../../members";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   connecting: "Conectando…",
@@ -328,6 +329,8 @@ export default function ChannelPage() {
           {sending ? "Enviando…" : "Enviar"}
         </button>
       </form>
+
+      {channel && <MemberList serverId={serverId} />}
     </main>
   );
 }
