@@ -2,6 +2,7 @@ package com.jsav.chat.common;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -44,6 +45,13 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(ConflictException.class)
   ResponseEntity<ApiError> conflict(ConflictException e) {
     return build(HttpStatus.CONFLICT, "conflict", e.getMessage());
+  }
+
+  @ExceptionHandler(TooManyRequestsException.class)
+  ResponseEntity<ApiError> tooManyRequests(TooManyRequestsException e) {
+    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()))
+        .body(ApiError.of(429, "too_many_requests", e.getMessage()));
   }
 
   private static ResponseEntity<ApiError> build(HttpStatus status, String error, String message) {

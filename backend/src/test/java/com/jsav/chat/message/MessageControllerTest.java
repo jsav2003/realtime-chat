@@ -9,11 +9,13 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jsav.chat.common.BadRequestException;
 import com.jsav.chat.common.GlobalExceptionHandler;
+import com.jsav.chat.common.TooManyRequestsException;
 import com.jsav.chat.config.SecurityConfig;
 import com.jsav.chat.message.MessageDtos.MessagePage;
 import com.jsav.chat.message.MessageDtos.MessageResponse;
@@ -91,6 +93,22 @@ class MessageControllerTest {
                 .content(body(KEY.toString(), "hola")))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.seq").value(1));
+  }
+
+  @Test
+  void send_overTheLimit_is429_withRetryAfter() throws Exception {
+    when(service.send(7L, 3L, new SendMessageRequest(KEY, "hola")))
+        .thenThrow(new TooManyRequestsException("Estás enviando muy rápido", 12));
+
+    mvc.perform(
+            post("/channels/3/messages")
+                .with(jwt().jwt(j -> j.subject("7")))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body(KEY.toString(), "hola")))
+        .andExpect(status().isTooManyRequests())
+        .andExpect(header().string("Retry-After", "12"))
+        .andExpect(jsonPath("$.status").value(429))
+        .andExpect(jsonPath("$.error").value("too_many_requests"));
   }
 
   @Test
