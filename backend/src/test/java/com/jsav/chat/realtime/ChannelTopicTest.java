@@ -20,6 +20,17 @@ class ChannelTopicTest {
     assertThat(ChannelTopic.parse(ChannelTopic.of(42))).isEqualTo(Optional.of(42L));
   }
 
+  @Test
+  void parsesATypingDestination() {
+    assertThat(ChannelTopic.parse("/topic/channel.123.typing")).isEqualTo(Optional.of(123L));
+  }
+
+  @Test
+  void typingOfAndParseAreInverse() {
+    assertThat(ChannelTopic.typingOf(42)).isEqualTo("/topic/channel.42.typing");
+    assertThat(ChannelTopic.parse(ChannelTopic.typingOf(42))).isEqualTo(Optional.of(42L));
+  }
+
   @ParameterizedTest
   @NullSource
   @ValueSource(
@@ -38,7 +49,15 @@ class ChannelTopicTest {
         "/topic/#",
         "/queue/channel.5",
         "topic/channel.5",
-        "/topic/channel.5 "
+        "/topic/channel.5 ",
+        "/topic/channel.5.typing.extra",
+        "/topic/channel.5.Typing",
+        "/topic/channel.5.typing ",
+        "/topic/channel.typing",
+        "/topic/channel.*.typing",
+        "/topic/channel.#.typing",
+        "/topic/channel.5.*",
+        "/topic/channel.5.#"
       })
   void rejectsAnythingElse(String destination) {
     assertThat(ChannelTopic.parse(destination)).isEmpty();
