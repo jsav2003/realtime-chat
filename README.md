@@ -14,9 +14,10 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 4 of 9.** Authorization over HTTP and WebSocket, message ordering, and
-> real-time delivery across two backend instances are built and verified, including a delivery
-> harness with fixed seeds. Presence, mentions, attachments and search are not built yet.
+> **Status: milestone 5 of 9.** Authorization over HTTP and WebSocket, message ordering,
+> real-time delivery across two backend instances, presence and a per-user message rate limit
+> are built and verified, including a delivery harness with fixed seeds. Mentions, attachments
+> and search are not built yet.
 > Nothing below claims a result that does not exist.
 
 ## Status
@@ -26,14 +27,14 @@ tested on purpose**, not just claimed:
 | 1 | Auth (bcrypt + JWT), users, servers, Flyway | done |
 | 2 | Channels, invite links, roles, `AccessPolicy`, HTTP authorization matrix | done |
 | 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | done |
-| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | **done** |
-| 5 | Presence and rate limiting | planned |
+| 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | done |
+| 5 | Presence across tabs and instances, "typing…", atomic token-bucket rate limit | **done** |
 | 6 | Mentions: outbox, worker, retries, dead-letter queue | planned |
 | 7 | Attachments (presigned S3 URLs) | planned |
 | 8 | Search and unread counts | planned |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestones 2 to 4)
+## What is already proven (milestones 2 to 5)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -42,7 +43,7 @@ tested on purpose**, not just claimed:
   non-member gets 404 on a private channel, so the response doesn't confirm it exists.
 - **An authorization matrix as tests:** every endpoint × 6 kinds of user (owner, admin,
   member, member of another server, unauthenticated, kicked a second ago), one test per
-  cell, 144 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
+  cell, 168 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
   not in the matrix, and another fails if [`docs/AUTHZ.md`](docs/AUTHZ.md) drifts from it.
   I broke a permission on purpose and added an unlisted endpoint to check the matrix
   notices; it did.
@@ -68,7 +69,7 @@ tested on purpose**, not just claimed:
   subscribers without going through the `seq` or `AccessPolicy`
   ([ADR 0006](docs/adr/0006-envio-solo-por-http.md)). `SUBSCRIBE` goes through `AccessPolicy`
   and reads the database on every subscription, and a second matrix covers it
-  (8 rows × 6 user types, 48 cells, in [`docs/AUTHZ.md`](docs/AUTHZ.md)).
+  (12 rows × 6 user types, 72 cells, in [`docs/AUTHZ.md`](docs/AUTHZ.md)).
 - **Kicking someone closes their sockets, on every instance.** The instance that handles the
   kick closes its own sockets and announces it on a RabbitMQ fanout exchange so the other
   instance does the same ([ADR 0007](docs/adr/0007-cerrar-sockets-al-expulsar.md)). With a
@@ -81,9 +82,27 @@ tested on purpose**, not just claimed:
   they do not prove. Its first run on seed 2 **failed** and found a real client bug (the
   resync cursor must be the end of the gap-free run, not the highest `seq`); that is fixed
   and written up there.
+- **Presence that survives tabs, instances and crashes.** A user is online while at least one
+  connection is alive on any instance: one Redis sorted set per user with an expiry per
+  connection, renewed by a heartbeat, so a dead tab or a dead instance switches itself off
+  ([ADR 0008](docs/adr/0008-presencia-por-conexion-con-vencimiento.md)). With two tabs, closing
+  one keeps the user online and closing both turns them off. Checked with real sockets,
+  including across instances and on a kick.
+- **A rate limit that holds under concurrency.** A token bucket in one Lua script, which Redis
+  runs atomically: 100 simultaneous requests against a bucket of 20 let exactly 20 through.
+  The naive read-then-write version lets all 100 through (I swapped it in to check the test
+  notices; it did). It is charged only to a new message, after `AccessPolicy` (a stranger still
+  gets 404) and after replay detection (resending a saved message is a 200 and costs nothing),
+  and before the `seq` is reserved, so a 429 leaves no gap
+  ([ADR 0009](docs/adr/0009-limite-de-mensajes-token-bucket.md)). If Redis is down it lets
+  messages through. The delivery harness waits out the 429s and still ends with zero
+  violations (434 and 446 throttled sends in two runs).
+- **"Typing…" is ephemeral and still goes in over HTTP**, so STOMP `SEND` stays closed
+  ([ADR 0010](docs/adr/0010-escribiendo-efimero-por-http.md)). It has its own topic and no
+  `seq`, and it is outside the delivery guarantee.
 
-363 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL
-and RabbitMQ) and 40 harness tests, Spotless-formatted.
+479 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
+RabbitMQ and Redis) and 43 harness tests, Spotless-formatted.
 
 ## The design in 30 seconds
 
@@ -114,9 +133,8 @@ flowchart LR
   FE -. presigned URLs .-> S3[(S3)]
 ```
 
-PostgreSQL, the REST API, the frontend, the RabbitMQ STOMP relay and the two-instance cluster
-exist today; Redis (presence, rate limiting) and the notification worker arrive in
-milestones 5 and 6.
+PostgreSQL, Redis, the REST API, the frontend, the RabbitMQ STOMP relay and the two-instance
+cluster exist today; the notification worker arrives in milestone 6.
 
 ## Documents
 
@@ -124,7 +142,7 @@ milestones 5 and 6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The design, written before the code: problems, decisions, verification plan, milestones |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP and STOMP matrices (checked by tests) |
-| [`docs/adr/`](docs/adr) | Seven decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick |
+| [`docs/adr/`](docs/adr) | Ten decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick, presence, message rate limit, ephemeral typing |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery guarantee, the harness, its results and its limits |
 | [`docs/v2.md`](docs/v2.md) | Ideas left out on purpose (bans, invite revocation…) |
 

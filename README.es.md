@@ -14,10 +14,10 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 4 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes
-> y la entrega en tiempo real entre dos instancias del backend están construidos y
-> verificados, con un arnés de entrega de semillas fijas. Presencia, menciones, adjuntos y
-> búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
+> **Estado: hito 5 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
+> la entrega en tiempo real entre dos instancias del backend, la presencia y un límite de
+> mensajes por usuario están construidos y verificados, con un arnés de entrega de semillas
+> fijas. Menciones, adjuntos y búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
 
 ## Estado
 
@@ -26,14 +26,14 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 | 1 | Auth (bcrypt + JWT), usuarios, servidores, Flyway | hecho |
 | 2 | Canales, invitaciones, roles, `AccessPolicy`, matriz de autorización HTTP | hecho |
 | 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | hecho |
-| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | **hecho** |
-| 5 | Presencia y rate limiting | planeado |
+| 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | hecho |
+| 5 | Presencia en varias pestañas e instancias, «escribiendo…», rate limit con token bucket atómico | **hecho** |
 | 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | planeado |
 | 7 | Adjuntos (URLs prefirmadas de S3) | planeado |
 | 8 | Búsqueda y no leídos | planeado |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hitos 2 a 4)
+## Lo que ya está demostrado (hitos 2 a 5)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -42,7 +42,7 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   miembro recibe 404 en un canal privado, para que la respuesta no confirme que existe.
 - **Una matriz de autorización como tests:** cada endpoint × 6 tipos de usuario (owner,
   admin, member, miembro de otro servidor, sin sesión, expulsado hace un segundo), un test
-  por celda, 144 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
+  por celda, 168 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
   que no está en la matriz, y otro si [`docs/AUTHZ.md`](docs/AUTHZ.md) se desvía de ella.
   Rompí un permiso a propósito y agregué un endpoint sin fila para comprobar que la matriz
   lo nota; lo notó.
@@ -69,8 +69,8 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   `SEND` por STOMP se rechaza, porque con el relay un `SEND` a `/topic/channel.N` llegaría a
   los suscriptores sin pasar por el `seq` ni por `AccessPolicy`
   ([ADR 0006](docs/adr/0006-envio-solo-por-http.md)). `SUBSCRIBE` pasa por `AccessPolicy` y lee
-  la base en cada suscripción, y una segunda matriz lo cubre (8 filas × 6 tipos de usuario,
-  48 celdas, en [`docs/AUTHZ.md`](docs/AUTHZ.md)).
+  la base en cada suscripción, y una segunda matriz lo cubre (12 filas × 6 tipos de usuario,
+  72 celdas, en [`docs/AUTHZ.md`](docs/AUTHZ.md)).
 - **Expulsar corta los sockets en todas las instancias.** La instancia que atiende la
   expulsión cierra los suyos y lo avisa por un exchange fanout de RabbitMQ para que la otra
   haga lo mismo ([ADR 0007](docs/adr/0007-cerrar-sockets-al-expulsar.md)). Con un token que
@@ -84,9 +84,27 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   semilla 2 **falló** y encontró un error real del cliente (el cursor de resincronización
   debe ser el final de la racha sin huecos, no el mayor `seq`); está arreglado y documentado
   ahí.
+- **Presencia que aguanta pestañas, instancias y caídas.** Un usuario está en línea mientras
+  tenga al menos una conexión viva en cualquier instancia: un ZSET de Redis por usuario con un
+  vencimiento por conexión, renovado por un latido, así que una pestaña o una instancia caída
+  se apaga sola ([ADR 0008](docs/adr/0008-presencia-por-conexion-con-vencimiento.md)). Con dos
+  pestañas, cerrar una lo deja en línea y cerrar las dos lo apaga. Probado con sockets reales,
+  también entre instancias y al expulsar.
+- **Un límite de mensajes que aguanta la concurrencia.** Un token bucket en un solo script Lua,
+  que Redis ejecuta de forma atómica: 100 solicitudes simultáneas contra un bucket de 20 dejan
+  pasar exactamente 20. La versión ingenua de leer y escribir en dos pasos deja pasar las 100
+  (la puse para comprobar que el test lo nota; lo notó). Se cobra solo al mensaje nuevo,
+  después de `AccessPolicy` (un extraño sigue recibiendo 404) y de detectar el reintento
+  (reenviar un mensaje guardado da 200 y no cuesta nada), y antes de reservar el `seq`, así que
+  un 429 no deja huecos ([ADR 0009](docs/adr/0009-limite-de-mensajes-token-bucket.md)). Si
+  Redis cae, deja pasar. El arnés de entrega espera los 429 y termina igual con cero
+  violaciones (434 y 446 envíos frenados en dos corridas).
+- **«Escribiendo…» es efímero y aun así entra por HTTP**, para que `SEND` por STOMP siga
+  cerrado ([ADR 0010](docs/adr/0010-escribiendo-efimero-por-http.md)). Tiene su propio tópico,
+  no lleva `seq` y queda fuera de la garantía de entrega.
 
-363 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
-PostgreSQL y RabbitMQ reales) y 40 del arnés, formateados con Spotless.
+479 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
+PostgreSQL, RabbitMQ y Redis reales) y 43 del arnés, formateados con Spotless.
 
 ## El diseño en 30 segundos
 
@@ -118,9 +136,8 @@ flowchart LR
   FE -. URLs prefirmadas .-> S3[(S3)]
 ```
 
-Hoy existen PostgreSQL, la API REST, el frontend, el relay STOMP de RabbitMQ y el cluster
-de dos instancias; Redis (presencia, rate limiting) y el worker de notificaciones llegan en
-los hitos 5 y 6.
+Hoy existen PostgreSQL, Redis, la API REST, el frontend, el relay STOMP de RabbitMQ y el
+cluster de dos instancias; el worker de notificaciones llega en el hito 6.
 
 ## Documentos
 
@@ -128,7 +145,7 @@ los hitos 5 y 6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | El diseño, escrito antes del código: problemas, decisiones, plan de verificación, hitos |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y las matrices HTTP y STOMP completas (las verifican tests) |
-| [`docs/adr/`](docs/adr) | Siete decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar |
+| [`docs/adr/`](docs/adr) | Diez decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar, presencia, límite de mensajes, «escribiendo…» efímero |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | La garantía de entrega, el arnés, sus resultados y sus límites |
 | [`docs/v2.md`](docs/v2.md) | Ideas que quedaron fuera a propósito (bans, revocar invitaciones…) |
 
