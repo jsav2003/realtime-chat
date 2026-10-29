@@ -4,16 +4,26 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 import org.testcontainers.utility.DockerImageName;
 
-/** Redis se agrega cuando llegue su hito (presencia y rate limiting). */
+/** Postgres, RabbitMQ (con STOMP) y Redis reales, igual que docker-compose.yml. */
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
 
   static final int STOMP_PORT = 61613;
+  static final int REDIS_PORT = 6379;
+
+  /** Presencia, «escribiendo…» y rate limiting (hito 5). */
+  @Bean
+  @ServiceConnection(name = "redis")
+  @SuppressWarnings("resource") // Spring cierra el contenedor al cerrar el contexto
+  GenericContainer<?> redisContainer() {
+    return new GenericContainer<>(DockerImageName.parse("redis:7")).withExposedPorts(REDIS_PORT);
+  }
 
   @Bean
   @ServiceConnection
