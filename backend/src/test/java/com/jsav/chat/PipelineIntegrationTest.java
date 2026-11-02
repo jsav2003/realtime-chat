@@ -89,13 +89,19 @@ public abstract class PipelineIntegrationTest {
     admin.purgeQueue(MentionTopology.DEAD_LETTERS, false);
   }
 
+  /** Al terminar cada prueba el worker queda parado y sin caídas armadas. */
   @AfterEach
   protected void stopWorker() {
+    stopWorkerContainer();
+    crashes.disarm();
+  }
+
+  /** Para el worker sin tocar las caídas armadas. */
+  protected void stopWorkerContainer() {
     var container = listeners.getListenerContainer(MentionWorker.LISTENER_ID);
     if (container != null && container.isRunning()) {
       container.stop();
     }
-    crashes.disarm();
   }
 
   protected void startWorker() {
