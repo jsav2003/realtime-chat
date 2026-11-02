@@ -7,10 +7,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * El worker de notificaciones (ADR 0013). {@code retryDelays} son las esperas entre un intento
  * fallido y el siguiente, de menor a mayor: tras el último fallo el evento va a la cola de mensajes
- * muertos. Con tres esperas hay cuatro intentos en total.
+ * muertos. Con tres esperas hay cuatro intentos en total. {@code confirmTimeout} es cuánto espera
+ * el worker a que RabbitMQ confirme el traspaso de un evento a una cola de espera o a la de
+ * muertos.
  */
 @ConfigurationProperties(prefix = "app.worker")
-public record WorkerProperties(List<Duration> retryDelays) {
+public record WorkerProperties(List<Duration> retryDelays, Duration confirmTimeout) {
 
   public WorkerProperties {
     if (retryDelays == null || retryDelays.isEmpty()) {
@@ -26,6 +28,9 @@ public record WorkerProperties(List<Duration> retryDelays) {
       previous = delay;
     }
     retryDelays = List.copyOf(retryDelays);
+    if (confirmTimeout == null || confirmTimeout.isZero() || confirmTimeout.isNegative()) {
+      throw new IllegalArgumentException("app.worker.confirm-timeout debe ser positivo");
+    }
   }
 
   /** Cuántas veces se intenta un evento antes de mandarlo a la cola de mensajes muertos. */
