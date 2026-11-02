@@ -12,9 +12,11 @@
 	<artifactId>harness</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>harness</name>
-	<description>Arnés de entrega: N clientes STOMP contra dos instancias del backend (DESIGN.md 8.1)</description>
+	<description>Arnés de entrega (DESIGN.md 8.1) y de menciones (8.3) contra el cluster de dos instancias del backend</description>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Qué arnés corre exec:java. Para el de menciones: -Dharness.main=com.jsav.chat.harness.MentionsHarness -->
+		<harness.main>com.jsav.chat.harness.DeliveryHarness</harness.main>
 	</properties>
 	<dependencies>
 		<!-- Cliente STOMP de Spring (WebSocketStompClient) y el cliente WebSocket de Tomcat. -->
@@ -40,7 +42,7 @@
 				<artifactId>exec-maven-plugin</artifactId>
 				<version>3.6.4</version>
 				<configuration>
-					<mainClass>com.jsav.chat.harness.DeliveryHarness</mainClass>
+					<mainClass>${harness.main}</mainClass>
 				</configuration>
 			</plugin>
 			<plugin>

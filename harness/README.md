@@ -17,6 +17,39 @@ backend/mvnw -f harness/pom.xml compile exec:java -Dexec.args="--seed 42"
 Las pruebas del propio arnés (que cada invariante detecta lo que debe detectar) no necesitan
 Docker: `backend/mvnw -f harness/pom.xml test`.
 
+## Arnés de menciones
+
+El hermano real del test `WorkerInterruptedIntegrationTest` ([`DESIGN.md` §8.3](../DESIGN.md)):
+N clientes envían mensajes que **mencionan** a otros (`@usuario`) y, mientras tanto, se le manda
+**SIGKILL** al contenedor `worker` varias veces (`docker compose --profile cluster kill worker`),
+cada una a un progreso de la corrida fijado por la semilla y con el worker caído entre 0,3 y 3 s.
+Al terminar compara lo que cada persona recibe por `GET /notifications` con los mensajes que
+quedaron guardados, y comprueba tres invariantes:
+
+1. **Completa:** toda mención de un mensaje guardado terminó notificada.
+2. **Sin duplicados:** nadie tiene dos notificaciones por el mismo mensaje.
+3. **Fiel:** nadie recibió una notificación de un mensaje que no lo mencionaba (ni de uno propio).
+
+Además mide cuánto tarda el worker en terminar todo después del último envío. Los reenvíos
+deliberados de mensajes ya confirmados no deben notificar otra vez: ya cuentan en «Fiel».
+
+```bash
+# El cluster incluye el servicio `worker` (los backends tienen el worker apagado).
+docker compose --profile cluster up -d --build
+
+backend/mvnw -f harness/pom.xml compile exec:java \
+  -Dharness.main=com.jsav.chat.harness.MentionsHarness -Dexec.args="--seed 42"
+```
+
+Opciones propias: `--kills N` (veces que se mata al worker; 6 por defecto) y `--mention-rate X`
+(fracción de mensajes que mencionan a alguien; 0,7). Usa las mismas del arnés de entrega para lo
+demás, pero con **40 mensajes por cliente** si no se pide otra cosa: con 80 y 8 clientes alguien
+recibiría más menciones de las que el servidor entrega en una consulta (100).
+
+Si no consigue matar al worker ni una vez (por ejemplo, Docker no responde), lo dice como una
+violación más: un pase sin caídas no prueba nada. Las pruebas del propio arnés (el plan sembrado,
+las invariantes y el que mata al worker) no necesitan Docker: `backend/mvnw -f harness/pom.xml test`.
+
 ## El límite de mensajes
 
 El backend limita los mensajes nuevos por usuario (20 y 30 por minuto por defecto, ADR 0009) y el

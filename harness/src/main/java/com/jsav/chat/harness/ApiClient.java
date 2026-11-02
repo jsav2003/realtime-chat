@@ -28,6 +28,12 @@ public final class ApiClient {
   /** Respuesta de un envío: 201 si es nuevo, 200 si es un reintento ya guardado. */
   public record SendResult(int status, Stored message) {}
 
+  /** Una notificación de mención como la ve quien la recibe. */
+  public record NotificationView(long id, long messageId, long channelId, long seq, boolean read) {}
+
+  /** Las menciones de una persona y cuántas tiene sin leer. */
+  public record Notifications(long unreadCount, List<NotificationView> items) {}
+
   /** El servidor respondió, pero no con éxito. */
   public static final class ApiException extends RuntimeException {
     public final int status;
@@ -139,6 +145,23 @@ public final class ApiClient {
       }
       after = all.get(all.size() - 1).seq();
     }
+  }
+
+  /** Las últimas {@code limit} menciones de {@code who} (el servidor admite hasta 100). */
+  public Notifications listNotifications(Account who, int limit) {
+    String json = get(who.token(), "/notifications?limit=" + limit);
+    List<Map<String, Object>> raw = JsonPath.read(json, "$.items");
+    List<NotificationView> items = new ArrayList<>();
+    for (Map<String, Object> n : raw) {
+      items.add(
+          new NotificationView(
+              ((Number) n.get("id")).longValue(),
+              ((Number) n.get("messageId")).longValue(),
+              ((Number) n.get("channelId")).longValue(),
+              ((Number) n.get("seq")).longValue(),
+              (Boolean) n.get("read")));
+    }
+    return new Notifications(((Number) JsonPath.read(json, "$.unreadCount")).longValue(), items);
   }
 
   private static Stored parse(String json) {
