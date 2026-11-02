@@ -4,9 +4,12 @@ import com.jsav.chat.access.AccessPolicy;
 import com.jsav.chat.access.ChannelAction;
 import com.jsav.chat.common.BadRequestException;
 import com.jsav.chat.common.ConflictException;
+import com.jsav.chat.mention.MentionEvent;
+import com.jsav.chat.mention.MentionResolver;
 import com.jsav.chat.message.MessageDtos.MessagePage;
 import com.jsav.chat.message.MessageDtos.MessageResponse;
 import com.jsav.chat.message.MessageDtos.SendMessageRequest;
+import com.jsav.chat.outbox.OutboxRepository;
 import com.jsav.chat.ratelimit.MessageRateLimiter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,18 +41,24 @@ public class MessageService {
   private final TransactionTemplate tx;
   private final ApplicationEventPublisher events;
   private final MessageRateLimiter rateLimiter;
+  private final MentionResolver mentions;
+  private final OutboxRepository outbox;
 
   public MessageService(
       MessageRepository messages,
       AccessPolicy policy,
       TransactionTemplate tx,
       ApplicationEventPublisher events,
-      MessageRateLimiter rateLimiter) {
+      MessageRateLimiter rateLimiter,
+      MentionResolver mentions,
+      OutboxRepository outbox) {
     this.messages = messages;
     this.policy = policy;
     this.tx = tx;
     this.events = events;
     this.rateLimiter = rateLimiter;
+    this.mentions = mentions;
+    this.outbox = outbox;
   }
 
   /**
@@ -84,14 +93,26 @@ public class MessageService {
     // huecos en la secuencia (ADR 0009).
     rateLimiter.acquire(userId);
 
-    // 3. Reservar el seq. Desde aquí, hasta el commit, nadie más escribe en este canal.
+    // 3. A quién se menciona (ADR 0011). Son solo lecturas y va antes de reservar el seq: el lock
+    // de la fila del canal se toma recién en el paso siguiente, y esto no lo alarga.
+    String body = req.body().strip();
+    List<Long> mentioned = mentions.recipients(userId, channelId, body);
+
+    // 4. Reservar el seq. Desde aquí, hasta el commit, nadie más escribe en este canal.
     long seq = messages.nextSeq(channelId);
 
-    // 4. Guardar. Vacío = otro reintento con la misma clave entró entre el paso 1 y este.
+    // 5. Guardar. Vacío = otro reintento con la misma clave entró entre el paso 1 y este.
     Message saved =
         messages
-            .insert(channelId, seq, userId, req.clientMsgId(), req.body().strip())
+            .insert(channelId, seq, userId, req.clientMsgId(), body)
             .orElseThrow(LostRetryRace::new);
+
+    // 6. Un evento por persona mencionada, en esta misma transacción (ADR 0004). El mensaje, su seq
+    // y sus eventos se confirman o se revierten juntos: nunca queda un mensaje sin sus menciones
+    // ni un evento de un mensaje que no existe. Un publicador los lleva a RabbitMQ después.
+    for (Long recipient : mentioned) {
+      outbox.add(MentionEvent.TYPE, new MentionEvent(saved.id(), channelId, userId, recipient));
+    }
     MessageResponse response = MessageResponse.from(saved);
     // Dentro de la transacción a propósito: el aviso real sale en AFTER_COMMIT (ADR 0003).
     events.publishEvent(new MessageCreated(response));
