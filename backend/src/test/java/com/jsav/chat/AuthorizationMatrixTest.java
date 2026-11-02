@@ -11,6 +11,9 @@ import com.jsav.chat.channel.ChannelService;
 import com.jsav.chat.invite.InviteDtos.CreateInviteRequest;
 import com.jsav.chat.invite.InviteDtos.InviteResponse;
 import com.jsav.chat.invite.InviteService;
+import com.jsav.chat.message.MessageDtos.SendMessageRequest;
+import com.jsav.chat.message.MessageService;
+import com.jsav.chat.notification.NotificationRepository;
 import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
 import com.jsav.chat.server.ServerDtos.ServerResponse;
@@ -43,6 +46,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -84,7 +88,8 @@ class AuthorizationMatrixTest {
     VICTIM, // un member cualquiera, objetivo de expulsión o cambio de rol
     OWNER_ID,
     NEWCOMER, // miembro del servidor que no está en ningún privado
-    CODE
+    CODE,
+    NOTIFICATION // una mención de la que se enteró member; para los demás es ajena
   }
 
   /** Un escenario nuevo por celda: ningún test ve lo que cambió otro. */
@@ -421,6 +426,35 @@ class AuthorizationMatrixTest {
               404,
               401,
               404),
+          // ---- notificaciones (hito 6): siempre las del usuario autenticado ----
+          // La lista es de quien pregunta; el expulsado recibe 200 pero sin lo de ese servidor
+          // (NotificationAccessIntegrationTest). Una notificación ajena es 404, igual que una que
+          // no existe: no se distingue.
+          row("GET", "/notifications", "las tuyas", NONE, null, 200, 200, 200, 200, 401, 200),
+          row(
+              "PUT",
+              "/notifications/{notificationId}/read",
+              "una notificación de member",
+              Map.of("notificationId", Ref.NOTIFICATION),
+              null,
+              404,
+              404,
+              204,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/notifications/read-all",
+              "las tuyas",
+              NONE,
+              null,
+              204,
+              204,
+              204,
+              204,
+              401,
+              204),
           // ---- invitaciones ----
           row(
               "POST",
@@ -468,6 +502,9 @@ class AuthorizationMatrixTest {
   @Autowired ServerService serverService;
   @Autowired ChannelService channelService;
   @Autowired InviteService inviteService;
+  @Autowired MessageService messageService;
+  @Autowired NotificationRepository notificationRepository;
+  @Autowired JdbcClient jdbc;
   @Autowired JwtService jwt;
 
   @Autowired
@@ -621,6 +658,23 @@ class AuthorizationMatrixTest {
     InviteResponse invite =
         inviteService.create(owner.getId(), s, new CreateInviteRequest(null, null));
 
+    // Una mención ya notificada a member, sembrada directo: el worker no corre a ritmo de prueba.
+    long messageId =
+        messageService
+            .send(
+                owner.getId(),
+                general.id(),
+                new SendMessageRequest(UUID.randomUUID(), "hola member"))
+            .message()
+            .id();
+    notificationRepository.insertIfAbsent(messageId, member.getId(), general.id());
+    long notificationId =
+        jdbc.sql("select id from notifications where message_id = :m and user_id = :u")
+            .param("m", messageId)
+            .param("u", member.getId())
+            .query(Long.class)
+            .single();
+
     // Con el servicio real, justo antes del request: el token sigue vigente, la membresía no.
     serverService.kick(owner.getId(), s, kicked.getId());
 
@@ -638,6 +692,7 @@ class AuthorizationMatrixTest {
     w.refs.put(Ref.OWNER_ID, String.valueOf(owner.getId()));
     w.refs.put(Ref.NEWCOMER, String.valueOf(newcomer.getId()));
     w.refs.put(Ref.CODE, invite.code());
+    w.refs.put(Ref.NOTIFICATION, String.valueOf(notificationId));
     return w;
   }
 }

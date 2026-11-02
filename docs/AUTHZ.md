@@ -36,6 +36,22 @@ aunque su token siga vigente.
 Un expulsado puede volver con una invitación vigente (`POST /invites/{code}/accept`
 devuelve 200). No existe una lista de bloqueados; queda en `docs/v2.md`.
 
+### Notificaciones de menciones (hito 6)
+
+Las notificaciones son siempre **del usuario autenticado**: ningún endpoint recibe el id de
+otra persona, y cada consulta va atada a `user_id`.
+
+- **A quién se avisa.** Al enviar un mensaje, un `@usuario` solo genera aviso si la persona
+  existe, no es quien escribe y **puede leer el canal** según `AccessPolicy` (ADR 0011). Avisar a
+  alguien que no ve un canal privado revelaría que el mensaje existe. Quien escribe no se entera
+  de a cuántos alcanzó.
+- **Qué se ve.** La lista (`GET /notifications`) se filtra **al leer**, contra el acceso de ahora:
+  un expulsado recibe `200` pero sin nada de ese servidor; quien sale de un privado o deja de ser
+  admin deja de ver lo de ese canal, sin que se borre ninguna fila. Por eso es `200` y no `404`
+  en la columna del expulsado: no es un recurso ajeno, es su propia lista, recortada.
+- **Marcar leída.** `PUT /notifications/{id}/read` con la notificación de otra persona responde
+  `404`, igual que con una que no existe: no se distingue.
+
 ## Matriz HTTP
 
 Una fila por endpoint y caso, una columna por tipo de usuario. **Esta tabla la verifica
@@ -75,6 +91,9 @@ válido.
 | `POST /channels/{channelId}/typing` | público | 204 | 204 | 204 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member sí está | 204 | 204 | 204 | 404 | 401 | 404 |
+| `GET /notifications` | las tuyas | 200 | 200 | 200 | 200 | 401 | 200 |
+| `PUT /notifications/{notificationId}/read` | una notificación de member | 404 | 404 | 204 | 404 | 401 | 404 |
+| `POST /notifications/read-all` | las tuyas | 204 | 204 | 204 | 204 | 401 | 204 |
 | `POST /servers/{serverId}/invites` | — | 201 | 201 | 403 | 404 | 401 | 404 |
 | `GET /invites/{code}` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
 | `POST /invites/{code}/accept` | vigente | 200 | 200 | 200 | 200 | 401 | 200 |
