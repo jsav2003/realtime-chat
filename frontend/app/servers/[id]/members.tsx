@@ -85,7 +85,7 @@ export function MemberList({ serverId }: { serverId: number }) {
                 ●
               </span>
             )}{" "}
-            {m.displayName}
+            {m.displayName} <small style={{ opacity: 0.6 }}>@{m.username}</small>
             {m.userId === me && " (tú)"}{" "}
             <small style={{ opacity: 0.6 }}>({m.role})</small>
           </li>

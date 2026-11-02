@@ -176,6 +176,15 @@ a la cola, la mención nunca se notifica. Se resuelve con una tabla *outbox* esc
 misma transacción que el mensaje, que un publicador lee y envía a la cola. El worker
 recibe al menos una vez, así que deduplica por `(message_id, user_id)`. Los fallos se
 reintentan con espera creciente y terminan en una cola de mensajes muertos.
+*Implementación (ADR 0011 a 0013):* el `@usuario` es un `username` único; la mención se resuelve
+al enviar, dentro de la transacción, y solo avisa a quien puede leer el canal (`AccessPolicy`). Un
+publicador por instancia lleva la outbox a RabbitMQ con `FOR UPDATE SKIP LOCKED` y marca solo lo que
+el broker confirmó y ruteó. El worker (un servicio aparte en el cluster) deduplica con
+`UNIQUE (message_id, user_id)` + `ON CONFLICT DO NOTHING`, reintenta pasando el evento por colas de
+espera de TTL creciente (2 s, 10 s, 1 min) y manda lo que agota sus intentos, o no tiene arreglo, a
+`mentions.dlq`. «Exactamente una vez» es del efecto (al menos una vez más una inserción
+idempotente), no de la entrega. La interfaz consulta `GET /notifications` cada 20 s, y la lista se
+filtra al leer contra el acceso de ahora.
 
 **Adjuntos.** El archivo nunca pasa por el backend: el cliente pide una URL prefirmada de
 S3, sube directo, y el backend solo registra el adjunto tras verificar que el objeto
@@ -203,7 +212,7 @@ Next.js ──HTTP (REST)──────▶ ┌──────────
 ## 7. Modelo de datos
 
 ```
-users            (id, email, password_hash, display_name)
+users            (id, email, password_hash, display_name, username)  -- username UNIQUE sin distinguir mayúsculas
 servers          (id, name, owner_id)
 server_members   (server_id, user_id, role)            -- owner | admin | member
 invites          (code, server_id, expires_at, max_uses, uses)
@@ -215,6 +224,8 @@ messages         (id, channel_id, seq, author_id, client_msg_id, body, created_a
 read_state       (user_id, channel_id, last_read_seq)
 attachments      (id, message_id, s3_key, size, content_type)
 outbox           (id, event_type, payload, created_at, published_at)
+notifications    (id, user_id, message_id, channel_id, created_at, read_at)
+                 UNIQUE (message_id, user_id)                -- la deduplicación del worker
 ```
 
 Un mensaje directo es un canal de tipo `dm` con exactamente dos miembros y sin servidor.
@@ -260,7 +271,8 @@ si el usuario no puede ver el recurso (no es miembro, o el canal es privado y no
 - **Secuencia:** 50 envíos simultáneos al mismo canal producen los `seq` 1 a 50, sin
   repetidos ni saltos.
 - **Outbox:** se mata el worker en momentos aleatorios. Toda mención termina notificada
-  exactamente una vez.
+  exactamente una vez. *(Hecho: `WorkerInterruptedIntegrationTest`, la deduplicación bajo
+  concurrencia y el arnés de menciones con SIGKILL real; ver `docs/DELIVERY.md`.)*
 
 ### 8.4 Pruebas por capa y de extremo a extremo
 
@@ -283,7 +295,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 3 · Mensajes | 14 | `seq` por canal, `client_msg_id`, paginación por cursor; test de 50 envíos simultáneos en verde |
 | 4 · Tiempo real | 20 | STOMP con relay a RabbitMQ, dos instancias, resincronización por `seq`, autorización en `SUBSCRIBE` (y `SEND` rechazado); **arnés de entrega en verde** (hecho, ver `docs/DELIVERY.md`) |
 | 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico (hecho, ver ADR 0008 a 0010) |
-| 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde |
+| 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde (hecho, ver ADR 0011 a 0013) |
 | 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño |
 | 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` |
 | 9 · Despliegue y cierre | 16 | CI/CD a AWS, Playwright, medición de la §8.5, documentación |

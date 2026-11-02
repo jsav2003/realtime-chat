@@ -85,6 +85,19 @@ public class AccessPolicy {
   }
 
   /**
+   * {@code true} si {@link #requireChannel} dejaría pasar. Sirve para decidir sin excepciones, por
+   * ejemplo a quién de varios notificar; la regla sigue siendo la de siempre, no una copia.
+   */
+  public boolean can(Long userId, Long channelId, ChannelAction action) {
+    try {
+      requireChannel(userId, channelId, action);
+      return true;
+    } catch (NotFoundException | ForbiddenException e) {
+      return false;
+    }
+  }
+
+  /**
    * Para expulsar o cambiar el rol de otro miembro. Además del permiso sobre el servidor: el owner
    * es intocable, nadie actúa sobre sí mismo, y un admin solo puede expulsar a members. Devuelve el
    * miembro objetivo.

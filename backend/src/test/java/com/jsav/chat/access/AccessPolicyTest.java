@@ -258,4 +258,22 @@ class AccessPolicyTest {
     assertThatThrownBy(() -> policy.requireChannel(OUTSIDER, 100L, ChannelAction.WRITE))
         .isInstanceOf(NotFoundException.class);
   }
+
+  // ---- can: la misma regla, sin excepciones ----
+
+  @Test
+  void can_isTrueExactlyWhenRequireChannelPasses() {
+    roster();
+    channel(100L, ChannelKind.TEXT);
+    channel(200L, ChannelKind.PRIVATE);
+    when(channelMembers.existsById(new ChannelMemberId(200L, MEMBER))).thenReturn(false);
+
+    assertThat(policy.can(MEMBER, 100L, ChannelAction.READ)).isTrue();
+    assertThat(policy.can(ADMIN, 200L, ChannelAction.READ)).isTrue();
+    // No lo ve (404) y no tiene el rol (403): en los dos casos, false.
+    assertThat(policy.can(MEMBER, 200L, ChannelAction.READ)).isFalse();
+    assertThat(policy.can(OUTSIDER, 100L, ChannelAction.READ)).isFalse();
+    assertThat(policy.can(MEMBER, 100L, ChannelAction.MANAGE_MEMBERS)).isFalse();
+    assertThat(policy.can(MEMBER, 999L, ChannelAction.READ)).isFalse();
+  }
 }

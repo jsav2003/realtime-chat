@@ -42,7 +42,7 @@ class MessageRepositoryIntegrationTest {
   @BeforeEach
   void setUp() {
     int run = RUNS.incrementAndGet();
-    author = users.save(new User("repo" + run + "@x.test", "x", "Autora " + run));
+    author = users.save(TestUsers.user("repo" + run + "@x.test", "x", "Autora " + run));
     Long serverId =
         serverService.create(author.getId(), new CreateServerRequest("Repo" + run)).id();
     general = channelService.list(author.getId(), serverId).get(0).id();
@@ -128,7 +128,7 @@ class MessageRepositoryIntegrationTest {
   void findByClientMsgId_findsOnlyTheAuthorsOwnKey() {
     UUID key = UUID.randomUUID();
     Message sent = send(general, key, "hola");
-    User stranger = users.save(new User("stranger" + RUNS.get() + "@x.test", "x", "Otro"));
+    User stranger = users.save(TestUsers.user("stranger" + RUNS.get() + "@x.test", "x", "Otro"));
 
     assertThat(messages.findByClientMsgId(author.getId(), key)).contains(sent);
     assertThat(messages.findByClientMsgId(stranger.getId(), key)).isEmpty();

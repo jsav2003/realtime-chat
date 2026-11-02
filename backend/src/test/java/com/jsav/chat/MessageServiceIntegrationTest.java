@@ -50,9 +50,9 @@ class MessageServiceIntegrationTest {
   @BeforeEach
   void setUp() {
     int run = RUNS.incrementAndGet();
-    owner = users.save(new User("svc" + run + "-owner@x.test", "x", "Owner"));
-    member = users.save(new User("svc" + run + "-member@x.test", "x", "Member"));
-    outsider = users.save(new User("svc" + run + "-out@x.test", "x", "Outsider"));
+    owner = users.save(TestUsers.user("svc" + run + "-owner@x.test", "x", "Owner"));
+    member = users.save(TestUsers.user("svc" + run + "-member@x.test", "x", "Member"));
+    outsider = users.save(TestUsers.user("svc" + run + "-out@x.test", "x", "Outsider"));
     serverId = serverService.create(owner.getId(), new CreateServerRequest("Svc" + run)).id();
     serverMembers.save(new ServerMember(serverId, member.getId(), Role.MEMBER));
     general = channelService.list(owner.getId(), serverId).get(0).id();

@@ -28,16 +28,18 @@ class AuthControllerTest {
   @MockitoBean AuthService auth;
 
   private static final String VALID =
-      "{\"email\":\"ana@x.com\",\"password\":\"password1\",\"displayName\":\"Ana\"}";
+      "{\"email\":\"ana@x.com\",\"password\":\"password1\",\"displayName\":\"Ana\","
+          + "\"username\":\"ana\"}";
 
   @Test
   void register_returns201WithoutAuthentication() throws Exception {
     when(auth.register(any()))
-        .thenReturn(new AuthResponse("tok", new UserResponse(1L, "ana@x.com", "Ana")));
+        .thenReturn(new AuthResponse("tok", new UserResponse(1L, "ana@x.com", "Ana", "ana")));
 
     mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(VALID))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.token").value("tok"));
+        .andExpect(jsonPath("$.token").value("tok"))
+        .andExpect(jsonPath("$.user.username").value("ana"));
   }
 
   @Test
@@ -46,12 +48,30 @@ class AuthControllerTest {
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"email\":\"no-es-correo\",\"password\":\"corta\",\"displayName\":\"\"}"))
+                    "{\"email\":\"no-es-correo\",\"password\":\"corta\",\"displayName\":\"\","
+                        + "\"username\":\"con espacio\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("validation_failed"))
         .andExpect(jsonPath("$.fields.email").exists())
         .andExpect(jsonPath("$.fields.password").exists())
-        .andExpect(jsonPath("$.fields.displayName").exists());
+        .andExpect(jsonPath("$.fields.displayName").exists())
+        .andExpect(jsonPath("$.fields.username").exists());
+  }
+
+  @Test
+  void register_rejectsUsernamesOutsideTheAllowedShape() throws Exception {
+    for (String bad : new String[] {"ab", "a".repeat(21), "con-guion", "ñandú", "@ana"}) {
+      mvc.perform(
+              post("/auth/register")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      "{\"email\":\"ana@x.com\",\"password\":\"password1\",\"displayName\":\"Ana\","
+                          + "\"username\":\""
+                          + bad
+                          + "\"}"))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.fields.username").exists());
+    }
   }
 
   @Test

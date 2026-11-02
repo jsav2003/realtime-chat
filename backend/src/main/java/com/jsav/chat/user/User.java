@@ -24,12 +24,17 @@ public class User {
   @Column(name = "display_name", nullable = false)
   private String displayName;
 
+  /** El handle de las menciones ({@code @beto}): único sin distinguir mayúsculas. */
+  @Column(nullable = false)
+  private String username;
+
   protected User() {}
 
-  public User(String email, String passwordHash, String displayName) {
+  public User(String email, String passwordHash, String displayName, String username) {
     this.email = email;
     this.passwordHash = passwordHash;
     this.displayName = displayName;
+    this.username = username;
   }
 
   public Long getId() {
@@ -46,5 +51,9 @@ public class User {
 
   public String getDisplayName() {
     return displayName;
+  }
+
+  public String getUsername() {
+    return username;
   }
 }

@@ -180,7 +180,7 @@ public final class Invariants {
   }
 
   /** Cuenta violaciones y guarda las primeras como ejemplo. */
-  private static final class Counter {
+  static final class Counter {
     private long count;
     private final List<String> examples = new ArrayList<>();
 

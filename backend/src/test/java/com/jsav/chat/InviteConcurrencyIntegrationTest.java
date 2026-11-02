@@ -49,7 +49,7 @@ class InviteConcurrencyIntegrationTest {
 
   private void assertOnlyAllowedEnter(int maxUses, int contenders) throws Exception {
     int run = RUNS.incrementAndGet();
-    User owner = users.save(new User("conc" + run + "-owner@x.test", "x", "Owner"));
+    User owner = users.save(TestUsers.user("conc" + run + "-owner@x.test", "x", "Owner"));
     Long serverId =
         serverService.create(owner.getId(), new CreateServerRequest("Concurrente" + run)).id();
     String code =
@@ -59,7 +59,7 @@ class InviteConcurrencyIntegrationTest {
 
     List<User> joiners = new ArrayList<>();
     for (int i = 0; i < contenders; i++) {
-      joiners.add(users.save(new User("conc" + run + "-" + i + "@x.test", "x", "U" + i)));
+      joiners.add(users.save(TestUsers.user("conc" + run + "-" + i + "@x.test", "x", "U" + i)));
     }
 
     ExecutorService pool = Executors.newFixedThreadPool(contenders);

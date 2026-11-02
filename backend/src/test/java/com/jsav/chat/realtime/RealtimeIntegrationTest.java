@@ -1,6 +1,7 @@
 package com.jsav.chat.realtime;
 
 import com.jsav.chat.ChatApplication;
+import com.jsav.chat.TestUsers;
 import com.jsav.chat.TestcontainersConfiguration;
 import com.jsav.chat.auth.JwtService;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
@@ -69,10 +70,10 @@ abstract class RealtimeIntegrationTest {
   @BeforeEach
   void setUpWorld() {
     int run = RUNS.incrementAndGet();
-    owner = users.save(new User("rt" + run + "-owner@x.test", "x", "Owner"));
-    admin = users.save(new User("rt" + run + "-admin@x.test", "x", "Admin"));
-    member = users.save(new User("rt" + run + "-member@x.test", "x", "Member"));
-    outsider = users.save(new User("rt" + run + "-out@x.test", "x", "Outsider"));
+    owner = users.save(TestUsers.user("rt" + run + "-owner@x.test", "x", "Owner"));
+    admin = users.save(TestUsers.user("rt" + run + "-admin@x.test", "x", "Admin"));
+    member = users.save(TestUsers.user("rt" + run + "-member@x.test", "x", "Member"));
+    outsider = users.save(TestUsers.user("rt" + run + "-out@x.test", "x", "Outsider"));
     serverId = serverService.create(owner.getId(), new CreateServerRequest("Rt" + run)).id();
     serverMembers.save(new ServerMember(serverId, admin.getId(), Role.ADMIN));
     serverMembers.save(new ServerMember(serverId, member.getId(), Role.MEMBER));

@@ -2,19 +2,22 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   Channel,
+  Member,
   Message,
   api,
   clearToken,
   getToken,
   getUserId,
 } from "@/lib/api";
+import { mentionsMe, splitMentions } from "@/lib/mentions";
 import { contiguousSeqOf, lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
 import { MemberList } from "../../members";
+import { MessageBody } from "./message-body";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   connecting: "Conectando…",
@@ -67,6 +70,16 @@ export default function ChannelPage() {
   const [rateLimitWait, setRateLimitWait] = useState<number | null>(null);
   const lastTypingNoticeAt = useRef(0);
   /**
+   * Los miembros del servidor, para resaltar las menciones de los mensajes. Es solo la interfaz: a
+   * quién se notifica lo decide el servidor. Si no se pueden cargar, no se resalta nada.
+   */
+  const [members, setMembers] = useState<Member[]>([]);
+  const usernames = useMemo(
+    () => new Set(members.map((m) => m.username.toLowerCase())),
+    [members],
+  );
+  const myUsername = members.find((m) => m.userId === getUserId())?.username ?? null;
+  /**
    * Los mensajes que se tienen, siempre al día. Los eventos del WebSocket llegan fuera del render
    * y no pueden leer el estado de React sin quedarse con un valor viejo; la referencia sí.
    */
@@ -100,6 +113,13 @@ export default function ChannelPage() {
         }
       });
   }, [router, channelId, addMessages]);
+
+  useEffect(() => {
+    api
+      .listMembers(serverId)
+      .then(setMembers)
+      .catch(() => setMembers([]));
+  }, [serverId]);
 
   /** Historial hacia atrás: lo anterior al primer seq que ya se tiene. */
   async function loadOlder() {
@@ -280,14 +300,24 @@ export default function ChannelPage() {
 
       {channel && messages.length === 0 && <p>Todavía no hay mensajes.</p>}
       <ol style={{ listStyle: "none", padding: 0 }}>
-        {messages.map((m) => (
-          <li key={m.seq} style={{ padding: "0.25rem 0" }}>
-            <small style={{ opacity: 0.6 }}>
-              #{m.seq} · {new Date(m.createdAt).toLocaleTimeString()}
-            </small>{" "}
-            <strong>{m.authorName}</strong>: {m.body}
-          </li>
-        ))}
+        {messages.map((m) => {
+          const pieces = splitMentions(m.body, usernames, myUsername);
+          return (
+            <li
+              key={m.seq}
+              data-mentions-me={mentionsMe(pieces)}
+              style={{
+                padding: "0.25rem 0",
+                background: mentionsMe(pieces) ? "#ffd54a22" : undefined,
+              }}
+            >
+              <small style={{ opacity: 0.6 }}>
+                #{m.seq} · {new Date(m.createdAt).toLocaleTimeString()}
+              </small>{" "}
+              <strong>{m.authorName}</strong>: <MessageBody pieces={pieces} />
+            </li>
+          );
+        })}
       </ol>
 
       <p>

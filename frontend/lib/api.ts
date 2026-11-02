@@ -20,7 +20,7 @@ export class ApiError extends Error {
 
 export type AuthResponse = {
   token: string;
-  user: { id: number; email: string; displayName: string };
+  user: { id: number; email: string; displayName: string; username: string };
 };
 
 export type Server = { id: number; name: string; ownerId: number };
@@ -46,7 +46,13 @@ export type Invite = {
 
 export type InvitePreview = { code: string; serverName: string };
 
-export type Member = { userId: number; displayName: string; role: Role };
+/** `username` es el handle con el que se menciona al miembro: `@beto`. */
+export type Member = {
+  userId: number;
+  displayName: string;
+  username: string;
+  role: Role;
+};
 
 /** Los ids de los miembros del servidor con alguna conexión viva. */
 export type Presence = { online: number[] };
@@ -69,15 +75,48 @@ export type Message = {
 /** Siempre en orden ascendente de seq. */
 export type MessagePage = { messages: Message[]; hasMore: boolean };
 
+/**
+ * Una mención de la que el servidor ya te avisó. `snippet` es el inicio del mensaje (hasta 120
+ * caracteres). Solo llegan las de canales que todavía puedes ver.
+ */
+export type NotificationItem = {
+  id: number;
+  messageId: number;
+  channelId: number;
+  channelName: string;
+  /** `null` si el canal no es de un servidor (mensajes directos). */
+  serverId: number | null;
+  seq: number;
+  authorName: string;
+  snippet: string;
+  createdAt: string;
+  read: boolean;
+};
+
+/** `unreadCount` cuenta todas las no leídas, aunque `items` traiga solo las últimas. */
+export type NotificationList = { unreadCount: number; items: NotificationItem[] };
+
 /** Uno de los dos cursores, o ninguno para pedir los últimos. */
 export type MessageCursor = { afterSeq?: number; beforeSeq?: number; limit?: number };
 
 export const getToken = () =>
   typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
 
-export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token);
+/**
+ * Se dispara cuando el usuario inicia o cierra sesión. Lo que vive en el layout (la campana de
+ * menciones) no se vuelve a montar al navegar, así que se entera por aquí.
+ */
+export const AUTH_EVENT = "chat:auth";
 
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+export const setToken = (token: string) => {
+  localStorage.setItem(TOKEN_KEY, token);
+  window.dispatchEvent(new Event(AUTH_EVENT));
+};
+
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  window.dispatchEvent(new Event(AUTH_EVENT));
+};
 
 /**
  * El id del usuario según el token (su `sub`). Solo sirve para la interfaz, por ejemplo para no
@@ -132,10 +171,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (email: string, password: string, displayName: string) =>
+  register: (email: string, password: string, displayName: string, username: string) =>
     request<AuthResponse>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password, displayName }),
+      body: JSON.stringify({ email, password, displayName, username }),
     }),
   login: (email: string, password: string) =>
     request<AuthResponse>("/auth/login", {
@@ -178,6 +217,13 @@ export const api = {
     const qs = q.toString();
     return request<MessagePage>(`/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
   },
+  /** Las últimas menciones que puedes ver, la más nueva primero. */
+  listNotifications: (limit = 20) =>
+    request<NotificationList>(`/notifications?limit=${limit}`),
+  markNotificationRead: (id: number) =>
+    request<void>(`/notifications/${id}/read`, { method: "PUT" }),
+  markAllNotificationsRead: () =>
+    request<void>("/notifications/read-all", { method: "POST" }),
   previewInvite: (code: string) =>
     request<InvitePreview>(`/invites/${encodeURIComponent(code)}`),
   acceptInvite: (code: string) =>

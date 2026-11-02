@@ -3,6 +3,7 @@ package com.jsav.chat.ratelimit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.jsav.chat.TestUsers;
 import com.jsav.chat.TestcontainersConfiguration;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
 import com.jsav.chat.channel.ChannelService;
@@ -52,8 +53,8 @@ class MessageRateLimitIntegrationTest {
   @BeforeEach
   void setUp() {
     int run = RUNS.incrementAndGet();
-    owner = users.save(new User("rl" + run + "-owner@x.test", "x", "Owner"));
-    member = users.save(new User("rl" + run + "-member@x.test", "x", "Member"));
+    owner = users.save(TestUsers.user("rl" + run + "-owner@x.test", "x", "Owner"));
+    member = users.save(TestUsers.user("rl" + run + "-member@x.test", "x", "Member"));
     Long serverId =
         serverService.create(owner.getId(), new CreateServerRequest("RateLimit" + run)).id();
     serverMembers.save(new ServerMember(serverId, member.getId(), Role.MEMBER));

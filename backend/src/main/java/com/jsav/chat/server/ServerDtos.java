@@ -20,7 +20,8 @@ public final class ServerDtos {
   /** Detalle del servidor, con el rol de quien pregunta. */
   public record ServerDetailResponse(Long id, String name, Long ownerId, String myRole) {}
 
-  public record MemberResponse(Long userId, String displayName, String role) {}
+  /** {@code username} es el handle con el que se menciona al miembro ({@code @beto}). */
+  public record MemberResponse(Long userId, String displayName, String username, String role) {}
 
   /** Solo se puede pasar a admin o member: owner no se asigna. */
   public record ChangeRoleRequest(
