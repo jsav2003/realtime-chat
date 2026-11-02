@@ -14,10 +14,11 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 5 of 9.** Authorization over HTTP and WebSocket, message ordering,
-> real-time delivery across two backend instances, presence and a per-user message rate limit
-> are built and verified, including a delivery harness with fixed seeds. Mentions, attachments
-> and search are not built yet.
+> **Status: milestone 6 of 9.** Authorization over HTTP and WebSocket, message ordering,
+> real-time delivery across two backend instances, presence, a per-user message rate limit and
+> mentions with notifications that survive the worker dying are built and verified, including a
+> delivery harness and a mentions harness with fixed seeds. Attachments and search are not built
+> yet.
 > Nothing below claims a result that does not exist.
 
 ## Status
@@ -28,13 +29,13 @@ tested on purpose**, not just claimed:
 | 2 | Channels, invite links, roles, `AccessPolicy`, HTTP authorization matrix | done |
 | 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | done |
 | 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | done |
-| 5 | Presence across tabs and instances, "typing…", atomic token-bucket rate limit | **done** |
-| 6 | Mentions: outbox, worker, retries, dead-letter queue | planned |
+| 5 | Presence across tabs and instances, "typing…", atomic token-bucket rate limit | done |
+| 6 | Mentions: outbox, worker, retries, dead-letter queue | **done** |
 | 7 | Attachments (presigned S3 URLs) | planned |
 | 8 | Search and unread counts | planned |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestones 2 to 5)
+## What is already proven (milestones 2 to 6)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -43,7 +44,7 @@ tested on purpose**, not just claimed:
   non-member gets 404 on a private channel, so the response doesn't confirm it exists.
 - **An authorization matrix as tests:** every endpoint × 6 kinds of user (owner, admin,
   member, member of another server, unauthenticated, kicked a second ago), one test per
-  cell, 168 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
+  cell, 186 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
   not in the matrix, and another fails if [`docs/AUTHZ.md`](docs/AUTHZ.md) drifts from it.
   I broke a permission on purpose and added an unlisted endpoint to check the matrix
   notices; it did.
@@ -100,9 +101,33 @@ tested on purpose**, not just claimed:
 - **"Typing…" is ephemeral and still goes in over HTTP**, so STOMP `SEND` stays closed
   ([ADR 0010](docs/adr/0010-escribiendo-efimero-por-http.md)). It has its own topic and no
   `seq`, and it is outside the delivery guarantee.
+- **A mention is notified once even if the worker dies.** The event is written to an *outbox*
+  table in the same transaction as the message; a publisher carries it to RabbitMQ and counts it
+  as published only if the broker confirmed and routed it; the worker deduplicates with
+  `UNIQUE (message_id, user_id)` in a single statement, retries with waits of 2 s, 10 s and 1
+  min, and sends what cannot be fixed to a dead-letter queue
+  ([ADR 0011](docs/adr/0011-menciones-con-username-y-notificaciones-consultadas.md),
+  [0012](docs/adr/0012-publicador-de-la-outbox.md),
+  [0013](docs/adr/0013-worker-de-menciones-deduplicacion-reintentos-y-cola-de-muertos.md)). The
+  §8.3 test kills the worker before it processes an event and after it saved the notification,
+  cuts its connection, stops and restarts it, and kills the publisher right after it published a
+  batch: with three seeds and about 400 mentions each, every (message, person) ended with exactly
+  one notification and none left over. "Exactly once" is about the effect, not the delivery.
+- **The deliberate breakages were measured, and one corrected me.** The naive deduplication
+  ("does it exist?" and then "create it") **passed** the big test on all three seeds: after a
+  crash the event comes back after the first attempt finished, and even that version catches it.
+  What breaks it is two workers processing the same event at the same time, so I added a
+  concurrency test, and against the naive version it creates 72 notifications instead of 20. A
+  publisher that marks the batch without looking at the confirmations (3 of 8 tests) and events
+  written after the message commit also failed, as they should.
+- **Only people who can read the channel are notified, and the list is filtered when read.** A
+  mention of someone who cannot see a private channel tells them nothing (it would reveal the
+  message exists). Someone who is kicked, leaves a private channel or stops being an admin stops
+  seeing those mentions without any row being deleted, and another person's notification answers
+  404, the same as a missing one (three new matrix rows).
 
-479 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
-RabbitMQ and Redis) and 43 harness tests, Spotless-formatted.
+584 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
+RabbitMQ and Redis) and 66 harness tests, Spotless-formatted.
 
 ## The design in 30 seconds
 
@@ -133,8 +158,8 @@ flowchart LR
   FE -. presigned URLs .-> S3[(S3)]
 ```
 
-PostgreSQL, Redis, the REST API, the frontend, the RabbitMQ STOMP relay and the two-instance
-cluster exist today; the notification worker arrives in milestone 6.
+PostgreSQL, Redis, the REST API, the frontend, the RabbitMQ STOMP relay, the two-instance
+cluster and the notification worker (a separate cluster service) exist today.
 
 ## Documents
 
@@ -142,7 +167,7 @@ cluster exist today; the notification worker arrives in milestone 6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The design, written before the code: problems, decisions, verification plan, milestones |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP and STOMP matrices (checked by tests) |
-| [`docs/adr/`](docs/adr) | Ten decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick, presence, message rate limit, ephemeral typing |
+| [`docs/adr/`](docs/adr) | Thirteen decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick, presence, message rate limit, ephemeral typing, mentions and notifications, the outbox publisher, the worker (deduplication, retries, dead letters) |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery guarantee, the harness, its results and its limits |
 | [`docs/v2.md`](docs/v2.md) | Ideas left out on purpose (bans, invite revocation…) |
 
@@ -166,11 +191,14 @@ cd ../frontend
 npm install && npm run dev               # app on :3000, /api is proxied to the backend
 ```
 
-To run two instances behind a load balancer (needed by the harness) and run the harness:
+To run two instances behind a load balancer plus the notification worker (the harnesses need
+them) and run the delivery harness and the mentions harness:
 
 ```bash
-docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balancer :8088
+docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balancer :8088, worker
 backend/mvnw -f harness/pom.xml compile exec:java -Dexec.args="--seed 42"
+backend/mvnw -f harness/pom.xml compile exec:java \
+  -Dharness.main=com.jsav.chat.harness.MentionsHarness -Dexec.args="--seed 42"   # SIGKILLs the worker
 ```
 
 To use the cluster from the browser, start the frontend with
@@ -186,9 +214,10 @@ characters) in any real deployment.
 ## Layout
 
 ```
-backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access
-frontend/   Next.js 16: login, register, servers, channels (live), invite page
-harness/    delivery harness: N STOMP clients against two instances, four invariants
+backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access,
+            presence, ratelimit, typing, mention, outbox, notification (worker)
+frontend/   Next.js 16: login, register, servers, channels (live), mentions, invite page
+harness/    delivery harness (N STOMP clients, four invariants) and mentions harness (SIGKILL the worker)
 nginx/      load balancer config for the two-instance cluster
 docs/       authorization matrices, delivery results, ADRs, ideas for v2
 ```

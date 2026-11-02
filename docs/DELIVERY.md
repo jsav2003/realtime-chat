@@ -124,6 +124,104 @@ Cuidado con qué se concluye de esto: las tres corridas son pocas y la semilla f
 no el intercalado de hilos. Dicen que el límite no rompe la entrega en estos escenarios, no que
 no pueda hacerlo en otros.
 
+## Notificaciones de menciones (hito 6)
+
+**La garantía:** toda mención de un mensaje guardado termina notificada **exactamente una vez**, y
+solo a quien puede leer el canal, aunque el worker, el publicador o la conexión a RabbitMQ mueran
+en cualquier momento (DESIGN.md §5 y §8.3). «Exactamente una vez» es del **efecto**, no de la
+entrega: el evento llega *al menos una vez* y la inserción de la notificación es idempotente.
+Se sostiene con cuatro piezas:
+
+- el evento se escribe en la `outbox` **en la misma transacción** que el mensaje y su `seq`
+  (ADR 0004, 0011): se confirman o se revierten juntos;
+- un publicador por instancia lo lleva a RabbitMQ con `FOR UPDATE SKIP LOCKED` y lo marca como
+  publicado solo si el broker lo **confirmó y lo ruteó** (ADR 0012);
+- el worker deduplica con `UNIQUE (message_id, user_id)` + `INSERT … ON CONFLICT DO NOTHING`, en
+  una sola sentencia (ADR 0013);
+- un fallo reintenta por colas de espera de 2 s, 10 s y 1 min, y lo que no tiene arreglo, o agota
+  sus intentos, queda en `mentions.dlq` con el motivo (ADR 0013).
+
+### El test del §8.3
+
+`WorkerInterruptedIntegrationTest` (Postgres y RabbitMQ reales): 7 usuarios en un canal, 4
+emisores con 50 mensajes cada uno que mencionan al azar a 1–3 personas, y mientras entran:
+
+- el **worker** «muere» antes de procesar un evento (20 %) y después de guardar su notificación y
+  antes de confirmarlo (20 %);
+- su **conexión** a RabbitMQ se corta a la fuerza 6 veces y el worker se para y se arranca 3;
+- dos **publicadores** (como dos instancias) mueren justo después de publicar un lote y antes de
+  marcarlo (30 % de los lotes): ese lote sale dos veces.
+
+Al terminar, contra lo que se envió, exige: (1) cada (mensaje, persona) mencionada tiene
+exactamente una notificación, (2) no hay ninguna de más, (3) la outbox no tiene pendientes y (4)
+la cola de mensajes muertos está vacía. Y exige que la corrida **haya tocado** las ventanas
+peligrosas (caídas y duplicados descartados mayores que cero): sin eso, un pase no probaría nada.
+Semillas fijas; equipo: Windows 11, 8 hilos, Java 23.0.1, todo en una sola máquina.
+
+| Semilla | Menciones | Caídas del worker | De ellas, tras guardar y antes del ack | Caídas del publicador | Duplicados descartados | Violaciones |
+|---|---|---|---|---|---|---|
+| 42 | 408 | 131 | 56 | 35 | 241 | 0 |
+| 7 | 397 | 105 | 49 | 40 | 383 | 0 |
+| 2026 | 407 | 107 | 48 | 26 | 194 | 0 |
+
+**Cero violaciones en las tres corridas** (1 212 menciones). Las caídas del test no son un proceso
+que desaparece: son excepciones que salen por fuera del listener, y para RabbitMQ equivalen a un
+mensaje sin confirmar (vuelve a la cola). Lo que sí mata un proceso de verdad es el arnés de la
+sección siguiente.
+
+### El arnés con SIGKILL real
+
+`MentionsHarness` (ver [`harness/README.md`](../harness/README.md)) hace lo mismo con procesos de
+verdad, contra el cluster de `docker compose`: 8 clientes envían 40 mensajes cada uno por el
+balanceador (70 % con una o dos menciones, 15 % reenviados a propósito), y a ciertos progresos de
+la corrida, fijados por la semilla, se le manda **SIGKILL** al contenedor `worker`
+(`docker compose kill`), que se deja caído entre 0,3 y 3 s y se levanta de nuevo. Al terminar
+compara lo que cada persona recibe por `GET /notifications` con los mensajes que quedaron
+guardados, y comprueba tres invariantes: toda mención guardada terminó notificada (*completa*),
+nadie tiene dos notificaciones por el mismo mensaje (*sin duplicados*) y nadie recibió una de un
+mensaje que no lo mencionaba (*fiel*). Mismo equipo; el límite de mensajes está en su valor por
+defecto, así que los emisores esperan sus 429 como en el hito 5.
+
+| Semilla | Mensajes | Menciones esperadas | Notificaciones recibidas | Muertes del worker | Reenvíos | Envíos frenados por 429 | Hasta tener todo, tras el último envío | Violaciones (completa / sin duplicados / fiel) |
+|---|---|---|---|---|---|---|---|---|
+| 42 | 320 | 340 | 340 | 6 de 6 | 43 | 119 | 30,1 s | 0 / 0 / 0 |
+| 7 | 320 | 335 | 335 | 6 de 6 | 41 | 126 | 29,3 s | 0 / 0 / 0 |
+
+**Cero violaciones:** las 675 menciones de las dos corridas terminaron notificadas exactamente una
+vez, y los 84 reenvíos de mensajes ya confirmados no notificaron de nuevo. Los ~30 s finales no son
+el worker procesando sino su regreso: tras un SIGKILL arranca la aplicación entera de Spring Boot
+(54 s al levantar el cluster), y mientras tanto los eventos esperan en la cola, que es justo lo que
+se quería ver. Lo que esta corrida **no** distingue es cuántas de las 12 muertes cayeron con un
+evento en proceso; esa ventana (guardado pero sin confirmar) la fuerza el test de arriba, no un
+SIGKILL al azar.
+
+### Lo que encontró romperlo a propósito
+
+Un test que nunca falla no demuestra nada, así que cada pieza se rompió y se corrió su test
+(todo compila; el código se restauró con `git checkout` después de cada rotura, 02/11):
+
+| Rotura | Test que la detecta | Resultado |
+|---|---|---|
+| Deduplicación ingenua: «¿ya existe?» y luego «créala», sin `UNIQUE` | `NotificationDedupeConcurrencyIntegrationTest` (160 llamadas a la vez sobre 20 pares) | falla: crea **72 en vez de 20** |
+| La misma, contra el test grande | `WorkerInterruptedIntegrationTest` | **pasa las tres semillas** (ver abajo) |
+| El publicador marca todo el lote sin mirar lo que el broker confirmó | `OutboxPublisherIntegrationTest` | fallan 3 de 8: el broker que no confirma nada, el evento sin cola, el lote confirmado a medias |
+| Los eventos se escriben *después* del commit del mensaje | `MentionOutboxIntegrationTest` | falla 1 de 9: queda un mensaje guardado sin sus menciones (1 donde debía haber 0) |
+
+**La segunda fila es el hallazgo.** Mi plan decía que la deduplicación ingenua haría fallar el
+test grande, y no es cierto: tras una caída, el evento se reentrega *después* de que el primer
+intento terminó, y hasta «¿ya existe?» lo atrapa. Lo que rompe a la versión ingenua es que dos
+workers procesen el mismo evento **a la vez**, y el test grande no lo provoca de forma fiable.
+Por eso hay una prueba de concurrencia aparte: sin ella, el §8.3 pasaba en verde con una
+deduplicación incorrecta.
+
+Dos errores míos que las pruebas mismas delataron, anotados porque se parecen a los que se
+cuelan sin que nadie los vea: (1) el primer contador de fallos de la prueba de reintentos vivía
+en una tabla *dentro del trigger que lanza la excepción*, y Postgres lo revertía junto con la
+sentencia, así que el presupuesto nunca bajaba y «falla siempre» pasaba por la razón equivocada;
+ahora cuenta con una secuencia, que no se revierte. (2) El plan sembrado de menciones del arnés
+usaba semillas casi consecutivas para `java.util.Random`, cuya primera salida es casi igual, y las
+menciones salían en bloques por cliente; lo notó la prueba de la tasa y ahora la semilla se mezcla.
+
 ## Lo que encontró el arnés
 
 Antes de arreglar el cliente, el arnés corrió con tres semillas. Dos pasaron y **una falló**:
@@ -194,3 +292,16 @@ completo.
 - **No mide latencia ni rendimiento** (DESIGN.md §8.5): eso también es del hito 9.
 - **Una resincronización final siempre ayuda.** Por eso el informe separa lo que llegó en
   vivo, lo que trajo la resincronización y cuántos mensajes faltaban antes de la final.
+
+Y, para las notificaciones del hito 6:
+
+- **El SIGKILL real es solo del worker.** Postgres y RabbitMQ no se reinician durante la corrida
+  de menciones, y a un backend (donde corre el publicador) no se le manda SIGKILL: el publicador
+  solo se probó con caídas simuladas justo después de publicar y con dos publicadores a la vez.
+- **Las caídas del test grande son excepciones, no procesos que desaparecen.** Para RabbitMQ
+  equivalen a un mensaje sin confirmar, que es lo que importa para la deduplicación, pero no
+  prueban lo que pasa con el estado en memoria de un proceso muerto (el worker no guarda ninguno).
+- **No mide la latencia de las notificaciones** (DESIGN.md §8.5, hito 9). La interfaz las consulta
+  cada 20 s, así que se ven con ese retraso más lo que tarde el publicador y el worker.
+- **Un mensaje que mata el proceso en bucle** no cuenta como intento y no llegaría a la cola de
+  mensajes muertos (ADR 0013); queda en `docs/v2.md`.

@@ -14,10 +14,11 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 5 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
-> la entrega en tiempo real entre dos instancias del backend, la presencia y un límite de
-> mensajes por usuario están construidos y verificados, con un arnés de entrega de semillas
-> fijas. Menciones, adjuntos y búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
+> **Estado: hito 6 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
+> la entrega en tiempo real entre dos instancias del backend, la presencia, un límite de
+> mensajes por usuario y las menciones con notificaciones que sobreviven a la muerte del worker
+> están construidos y verificados, con un arnés de entrega y uno de menciones de semillas
+> fijas. Adjuntos y búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
 
 ## Estado
 
@@ -27,13 +28,13 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 | 2 | Canales, invitaciones, roles, `AccessPolicy`, matriz de autorización HTTP | hecho |
 | 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | hecho |
 | 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | hecho |
-| 5 | Presencia en varias pestañas e instancias, «escribiendo…», rate limit con token bucket atómico | **hecho** |
-| 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | planeado |
+| 5 | Presencia en varias pestañas e instancias, «escribiendo…», rate limit con token bucket atómico | hecho |
+| 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | **hecho** |
 | 7 | Adjuntos (URLs prefirmadas de S3) | planeado |
 | 8 | Búsqueda y no leídos | planeado |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hitos 2 a 5)
+## Lo que ya está demostrado (hitos 2 a 6)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -42,7 +43,7 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   miembro recibe 404 en un canal privado, para que la respuesta no confirme que existe.
 - **Una matriz de autorización como tests:** cada endpoint × 6 tipos de usuario (owner,
   admin, member, miembro de otro servidor, sin sesión, expulsado hace un segundo), un test
-  por celda, 168 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
+  por celda, 186 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
   que no está en la matriz, y otro si [`docs/AUTHZ.md`](docs/AUTHZ.md) se desvía de ella.
   Rompí un permiso a propósito y agregué un endpoint sin fila para comprobar que la matriz
   lo nota; lo notó.
@@ -102,9 +103,33 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 - **«Escribiendo…» es efímero y aun así entra por HTTP**, para que `SEND` por STOMP siga
   cerrado ([ADR 0010](docs/adr/0010-escribiendo-efimero-por-http.md)). Tiene su propio tópico,
   no lleva `seq` y queda fuera de la garantía de entrega.
+- **Una mención se notifica una vez aunque el worker muera.** El evento se escribe en una tabla
+  *outbox* en la misma transacción que el mensaje; un publicador lo lleva a RabbitMQ y solo lo
+  da por publicado si el broker lo confirmó y lo ruteó; el worker deduplica con
+  `UNIQUE (message_id, user_id)` en una sola sentencia, reintenta con esperas de 2 s, 10 s y 1
+  min y manda lo que no tiene arreglo a una cola de mensajes muertos
+  ([ADR 0011](docs/adr/0011-menciones-con-username-y-notificaciones-consultadas.md),
+  [0012](docs/adr/0012-publicador-de-la-outbox.md),
+  [0013](docs/adr/0013-worker-de-menciones-deduplicacion-reintentos-y-cola-de-muertos.md)). El
+  test del §8.3 mata al worker antes de procesar y después de guardar la notificación, le corta
+  la conexión, lo para y lo arranca, y mata al publicador tras publicar un lote: con tres
+  semillas y unas 400 menciones cada una, cada (mensaje, persona) acabó con exactamente una
+  notificación y ninguna de más. «Exactamente una vez» es del efecto, no de la entrega.
+- **Las roturas a propósito se midieron, y una me corrigió.** La deduplicación ingenua
+  («¿ya existe?» y luego «créala») **pasó** el test grande en las tres semillas: tras una caída
+  el evento vuelve después de que el primer intento terminó, y hasta esa versión lo atrapa. Lo
+  que la rompe es que dos workers procesen el mismo evento a la vez, así que agregué una prueba
+  de concurrencia, y con la versión ingenua crea 72 notificaciones en vez de 20. También
+  fallaron, como debían, un publicador que marca el lote sin mirar las confirmaciones (3 de 8
+  pruebas) y los eventos escritos después del commit del mensaje.
+- **Solo se avisa a quien puede leer el canal, y la lista se filtra al leer.** Una mención a
+  alguien que no ve un canal privado no le avisa de nada (revelaría que el mensaje existe). Quien
+  es expulsado, sale de un privado o deja de ser admin deja de ver esas menciones sin que se
+  borre ninguna fila, y la notificación de otra persona responde 404, igual que una inexistente
+  (tres filas nuevas en la matriz).
 
-479 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
-PostgreSQL, RabbitMQ y Redis reales) y 43 del arnés, formateados con Spotless.
+584 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
+PostgreSQL, RabbitMQ y Redis reales) y 66 del arnés, formateados con Spotless.
 
 ## El diseño en 30 segundos
 
@@ -136,8 +161,8 @@ flowchart LR
   FE -. URLs prefirmadas .-> S3[(S3)]
 ```
 
-Hoy existen PostgreSQL, Redis, la API REST, el frontend, el relay STOMP de RabbitMQ y el
-cluster de dos instancias; el worker de notificaciones llega en el hito 6.
+Hoy existen PostgreSQL, Redis, la API REST, el frontend, el relay STOMP de RabbitMQ, el cluster
+de dos instancias y el worker de notificaciones (un servicio aparte del cluster).
 
 ## Documentos
 
@@ -145,7 +170,7 @@ cluster de dos instancias; el worker de notificaciones llega en el hito 6.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | El diseño, escrito antes del código: problemas, decisiones, plan de verificación, hitos |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y las matrices HTTP y STOMP completas (las verifican tests) |
-| [`docs/adr/`](docs/adr) | Diez decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar, presencia, límite de mensajes, «escribiendo…» efímero |
+| [`docs/adr/`](docs/adr) | Trece decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar, presencia, límite de mensajes, «escribiendo…» efímero, menciones y notificaciones, publicador de la outbox, worker (deduplicación, reintentos, cola de muertos) |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | La garantía de entrega, el arnés, sus resultados y sus límites |
 | [`docs/v2.md`](docs/v2.md) | Ideas que quedaron fuera a propósito (bans, revocar invitaciones…) |
 
@@ -170,11 +195,14 @@ cd ../frontend
 npm install && npm run dev               # app en :3000, /api se reenvía al backend
 ```
 
-Para levantar dos instancias detrás de un balanceador (lo necesita el arnés) y correr el arnés:
+Para levantar dos instancias detrás de un balanceador y el worker de notificaciones (lo necesitan
+los arneses) y correr el arnés de entrega y el de menciones:
 
 ```bash
-docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balanceador :8088
+docker compose --profile cluster up -d --build   # backend-a :8081, backend-b :8082, balanceador :8088, worker
 backend/mvnw -f harness/pom.xml compile exec:java -Dexec.args="--seed 42"
+backend/mvnw -f harness/pom.xml compile exec:java \
+  -Dharness.main=com.jsav.chat.harness.MentionsHarness -Dexec.args="--seed 42"   # mata al worker con SIGKILL
 ```
 
 Para usar el cluster desde el navegador, el frontend se arranca con
@@ -190,9 +218,10 @@ entorno (`JWT_SECRET` de al menos 32 caracteres).
 ## Estructura
 
 ```
-backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access
-frontend/   Next.js 16: login, registro, servidores, canales (en vivo), página de invitación
-harness/    arnés de entrega: N clientes STOMP contra dos instancias, cuatro invariantes
+backend/    Spring Boot 4.1 (Java 21): auth, server, channel, invite, message, realtime, access,
+            presence, ratelimit, typing, mention, outbox, notification (worker)
+frontend/   Next.js 16: login, registro, servidores, canales (en vivo), menciones, invitaciones
+harness/    arnés de entrega (N clientes STOMP, cuatro invariantes) y de menciones (SIGKILL al worker)
 nginx/      configuración del balanceador del cluster de dos instancias
 docs/       matrices de autorización, resultados de entrega, ADR, ideas para v2
 ```
