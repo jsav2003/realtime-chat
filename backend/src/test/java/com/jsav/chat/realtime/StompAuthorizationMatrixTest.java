@@ -2,6 +2,7 @@ package com.jsav.chat.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jsav.chat.TestUsers;
 import com.jsav.chat.channel.ChannelDtos.ChannelResponse;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
 import com.jsav.chat.server.Role;
@@ -349,7 +350,7 @@ class StompAuthorizationMatrixTest extends RealtimeIntegrationTest {
   }
 
   private User user(String email, String name) {
-    return users.save(new User(email, "no-login-needed", name));
+    return users.save(TestUsers.user(email, "no-login-needed", name));
   }
 
   private World newWorld() {

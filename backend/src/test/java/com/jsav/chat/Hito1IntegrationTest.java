@@ -22,7 +22,9 @@ class Hito1IntegrationTest {
 
   @Autowired MockMvc mvc;
 
+  /** El username es la parte local del correo, así cada correo de prueba da un handle distinto. */
   private String register(String email) throws Exception {
+    String username = email.substring(0, email.indexOf('@'));
     String body =
         mvc.perform(
                 post("/auth/register")
@@ -30,8 +32,12 @@ class Hito1IntegrationTest {
                     .content(
                         "{\"email\":\""
                             + email
-                            + "\",\"password\":\"password1\",\"displayName\":\"Test\"}"))
+                            + "\",\"password\":\"password1\",\"displayName\":\"Test\","
+                            + "\"username\":\""
+                            + username
+                            + "\"}"))
             .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.user.username").value(username))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -75,8 +81,30 @@ class Hito1IntegrationTest {
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"email\":\"DUP@x.com\",\"password\":\"password1\",\"displayName\":\"X\"}"))
+                    "{\"email\":\"DUP@x.com\",\"password\":\"password1\",\"displayName\":\"X\","
+                        + "\"username\":\"dup_otro\"}"))
         .andExpect(status().isConflict());
+  }
+
+  @Test
+  void duplicateUsernameIgnoringCase_returns409_andReservedNamesAre400() throws Exception {
+    register("mismo@x.com");
+
+    mvc.perform(
+            post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"email\":\"otro@x.com\",\"password\":\"password1\",\"displayName\":\"X\","
+                        + "\"username\":\"MISMO\"}"))
+        .andExpect(status().isConflict());
+
+    mvc.perform(
+            post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"email\":\"todos@x.com\",\"password\":\"password1\",\"displayName\":\"X\","
+                        + "\"username\":\"Everyone\"}"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

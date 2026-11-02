@@ -70,9 +70,11 @@ public class ServerService {
   @Transactional(readOnly = true)
   public List<MemberResponse> listMembers(Long userId, Long serverId) {
     policy.requireServer(userId, serverId, ServerAction.VIEW);
-    return members.findMembers(serverId).stream()
-        .map(m -> new MemberResponse(m.getUserId(), m.getDisplayName(), m.getRole()))
-        .toList();
+    return members.findMembers(serverId).stream().map(ServerService::toResponse).toList();
+  }
+
+  private static MemberResponse toResponse(ServerMemberRepository.MemberView m) {
+    return new MemberResponse(m.getUserId(), m.getDisplayName(), m.getUsername(), m.getRole());
   }
 
   @Transactional
@@ -85,7 +87,7 @@ public class ServerService {
     return members.findMembers(serverId).stream()
         .filter(m -> m.getUserId().equals(targetId))
         .findFirst()
-        .map(m -> new MemberResponse(m.getUserId(), m.getDisplayName(), m.getRole()))
+        .map(ServerService::toResponse)
         .orElseThrow();
   }
 

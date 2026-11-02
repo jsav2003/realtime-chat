@@ -583,7 +583,7 @@ class AuthorizationMatrixTest {
   // ---- escenario ----
 
   private User user(String email, String name) {
-    return users.save(new User(email, "no-login-needed", name));
+    return users.save(TestUsers.user(email, "no-login-needed", name));
   }
 
   private void join(Long serverId, User u, Role role) {

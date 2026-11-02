@@ -12,12 +12,14 @@ public interface ServerMemberRepository extends JpaRepository<ServerMember, Serv
 
     String getDisplayName();
 
+    String getUsername();
+
     String getRole();
   }
 
   @Query(
       """
-      select u.id as userId, u.displayName as displayName, m.role as role
+      select u.id as userId, u.displayName as displayName, u.username as username, m.role as role
       from ServerMember m, User u
       where m.id.serverId = :serverId and u.id = m.id.userId
       order by u.id

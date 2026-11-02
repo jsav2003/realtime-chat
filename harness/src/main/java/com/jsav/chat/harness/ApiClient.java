@@ -54,13 +54,13 @@ public final class ApiClient {
     this.base = base;
   }
 
-  public Account register(String email, String password, String displayName) {
+  public Account register(String email, String password, String displayName, String username) {
     String json =
         post(
             null,
             "/auth/register",
-            "{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\"}"
-                .formatted(email, password, displayName));
+            "{\"email\":\"%s\",\"password\":\"%s\",\"displayName\":\"%s\",\"username\":\"%s\"}"
+                .formatted(email, password, displayName, username));
     return new Account(
         ((Number) JsonPath.read(json, "$.user.id")).longValue(),
         email,

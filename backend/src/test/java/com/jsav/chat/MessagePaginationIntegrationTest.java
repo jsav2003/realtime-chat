@@ -49,8 +49,8 @@ class MessagePaginationIntegrationTest {
   @BeforeEach
   void setUp() {
     int run = RUNS.incrementAndGet();
-    owner = users.save(new User("page" + run + "-owner@x.test", "x", "Owner"));
-    member = users.save(new User("page" + run + "-member@x.test", "x", "Member"));
+    owner = users.save(TestUsers.user("page" + run + "-owner@x.test", "x", "Owner"));
+    member = users.save(TestUsers.user("page" + run + "-member@x.test", "x", "Member"));
     Long serverId = serverService.create(owner.getId(), new CreateServerRequest("Pag" + run)).id();
     serverMembers.save(new ServerMember(serverId, member.getId(), Role.MEMBER));
     general = channelService.list(owner.getId(), serverId).get(0).id();

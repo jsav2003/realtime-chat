@@ -56,7 +56,7 @@ class MessageSeqConcurrencyIntegrationTest {
     int run = RUNS.incrementAndGet();
     authors = new ArrayList<>();
     for (int i = 0; i < AUTHORS; i++) {
-      authors.add(users.save(new User("seq" + run + "-" + i + "@x.test", "x", "Autor " + i)));
+      authors.add(users.save(TestUsers.user("seq" + run + "-" + i + "@x.test", "x", "Autor " + i)));
     }
     Long serverId =
         serverService.create(authors.get(0).getId(), new CreateServerRequest("Seq" + run)).id();

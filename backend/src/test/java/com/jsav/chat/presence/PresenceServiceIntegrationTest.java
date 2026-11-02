@@ -3,6 +3,7 @@ package com.jsav.chat.presence;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.jsav.chat.TestUsers;
 import com.jsav.chat.TestcontainersConfiguration;
 import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.server.Role;
@@ -42,9 +43,9 @@ class PresenceServiceIntegrationTest {
   @BeforeEach
   void setUp() {
     int run = RUNS.incrementAndGet();
-    owner = users.save(new User("pr" + run + "-owner@x.test", "x", "Owner"));
-    member = users.save(new User("pr" + run + "-member@x.test", "x", "Member"));
-    outsider = users.save(new User("pr" + run + "-out@x.test", "x", "Outsider"));
+    owner = users.save(TestUsers.user("pr" + run + "-owner@x.test", "x", "Owner"));
+    member = users.save(TestUsers.user("pr" + run + "-member@x.test", "x", "Member"));
+    outsider = users.save(TestUsers.user("pr" + run + "-out@x.test", "x", "Outsider"));
     serverId = serverService.create(owner.getId(), new CreateServerRequest("Pr" + run)).id();
     serverMembers.save(new ServerMember(serverId, member.getId(), Role.MEMBER));
   }

@@ -6,7 +6,8 @@ import java.util.List;
 
 /**
  * El mundo de la corrida: N usuarios en un mismo servidor y un mismo canal. Los correos llevan la
- * hora de la corrida para que correrlo dos veces con la misma semilla no choque con la anterior.
+ * hora de la corrida para que correrlo dos veces con la misma semilla no choque con la anterior;
+ * el username (máximo 20 caracteres) también.
  */
 public record Setup(List<Account> accounts, long serverId, long channelId) {
 
@@ -18,7 +19,8 @@ public record Setup(List<Account> accounts, long serverId, long channelId) {
           api.register(
               "h%d-%s-%d@harness.test".formatted(sc.seed(), run, c),
               "harness-pass-1",
-              "Cliente" + c));
+              "Cliente" + c,
+              usernameOf(sc, run, c)));
     }
     Account owner = accounts.get(0);
     long serverId = api.createServer(owner, "Arnes " + sc.seed() + "-" + run);
@@ -28,5 +30,10 @@ public record Setup(List<Account> accounts, long serverId, long channelId) {
       api.acceptInvite(member, invite);
     }
     return new Setup(List.copyOf(accounts), serverId, channelId);
+  }
+
+  /** Por ejemplo {@code h42mabc123_3}: letras, números y guion bajo, 15 caracteres o menos. */
+  static String usernameOf(Scenario sc, String run, int client) {
+    return "h%d%s_%d".formatted(Math.floorMod(sc.seed(), 100L), run, client);
   }
 }

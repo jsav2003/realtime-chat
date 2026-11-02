@@ -20,7 +20,7 @@ export class ApiError extends Error {
 
 export type AuthResponse = {
   token: string;
-  user: { id: number; email: string; displayName: string };
+  user: { id: number; email: string; displayName: string; username: string };
 };
 
 export type Server = { id: number; name: string; ownerId: number };
@@ -46,7 +46,13 @@ export type Invite = {
 
 export type InvitePreview = { code: string; serverName: string };
 
-export type Member = { userId: number; displayName: string; role: Role };
+/** `username` es el handle con el que se menciona al miembro: `@beto`. */
+export type Member = {
+  userId: number;
+  displayName: string;
+  username: string;
+  role: Role;
+};
 
 /** Los ids de los miembros del servidor con alguna conexión viva. */
 export type Presence = { online: number[] };
@@ -132,10 +138,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (email: string, password: string, displayName: string) =>
+  register: (email: string, password: string, displayName: string, username: string) =>
     request<AuthResponse>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password, displayName }),
+      body: JSON.stringify({ email, password, displayName, username }),
     }),
   login: (email: string, password: string) =>
     request<AuthResponse>("/auth/login", {

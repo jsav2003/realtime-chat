@@ -18,7 +18,12 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
     const password = String(form.get("password"));
     try {
       const res = isRegister
-        ? await api.register(email, password, String(form.get("displayName")))
+        ? await api.register(
+            email,
+            password,
+            String(form.get("displayName")),
+            String(form.get("username")),
+          )
         : await api.login(email, password);
       setToken(res.token);
       router.push(takeNext() ?? "/");
@@ -38,6 +43,15 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
       <form onSubmit={onSubmit} style={{ display: "grid", gap: "0.75rem" }}>
         {isRegister && (
           <input name="displayName" placeholder="Nombre" required maxLength={50} />
+        )}
+        {isRegister && (
+          <input
+            name="username"
+            placeholder="Usuario para las menciones (@usuario)"
+            required
+            pattern="[A-Za-z0-9_]{3,20}"
+            title="De 3 a 20 letras, números o guion bajo, sin espacios"
+          />
         )}
         <input name="email" type="email" placeholder="Correo" required />
         <input

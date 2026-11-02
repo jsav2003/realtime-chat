@@ -90,7 +90,7 @@ class ServerControllerTest {
   @Test
   void changeRole_acceptsAdminOrMemberOnly() throws Exception {
     when(service.changeRole(7L, 1L, 8L, new ChangeRoleRequest("admin")))
-        .thenReturn(new MemberResponse(8L, "Beto", "admin"));
+        .thenReturn(new MemberResponse(8L, "Beto", "beto", "admin"));
 
     mvc.perform(
             put("/servers/1/members/8/role")
