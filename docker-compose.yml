@@ -43,6 +43,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # S3 de desarrollo para los adjuntos (hito 7): Adobe S3Mock, que crea el bucket al arrancar y guarda
+  # en memoria (se pierde al apagarlo). En producción es S3 de verdad. No valida la firma de las URLs.
+  s3:
+    image: adobe/s3mock:5.2.3
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${STORAGE_BUCKET:-chat-attachments}
+      COM_ADOBE_TESTING_S3MOCK_STORE_REGION: ${STORAGE_REGION:-us-east-1}
+    ports:
+      - "${S3_PORT:-9090}:9090"
+
   # Cluster de dos instancias (perfil "cluster"): docker compose --profile cluster up --build
   backend-a: &backend
     profiles: ["cluster"]
@@ -68,7 +78,13 @@ services:
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:3000}
       # El worker de notificaciones corre en su propio servicio (más abajo), no en los backends.
       APP_WORKER_ENABLED: "false"
+      # S3: el backend entra por el nombre del servicio; el navegador, por el puerto publicado.
+      STORAGE_ENDPOINT: http://s3:9090
+      STORAGE_PUBLIC_ENDPOINT: http://localhost:${S3_PORT:-9090}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-chat-attachments}
     depends_on:
+      s3:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
