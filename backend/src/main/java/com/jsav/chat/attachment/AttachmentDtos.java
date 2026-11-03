@@ -26,7 +26,7 @@ public final class AttachmentDtos {
   /** Lo que se ve de un adjunto: nunca lleva la clave de S3 ni una URL. */
   public record AttachmentInfo(Long id, String filename, long size, String contentType) {
 
-    static AttachmentInfo from(Attachment a) {
+    public static AttachmentInfo from(Attachment a) {
       return new AttachmentInfo(a.id(), a.filename(), a.size(), a.contentType());
     }
   }

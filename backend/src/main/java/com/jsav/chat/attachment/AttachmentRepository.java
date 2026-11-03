@@ -3,6 +3,8 @@ package com.jsav.chat.attachment;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -51,6 +53,49 @@ public class AttachmentRepository {
         .param("id", id)
         .query(AttachmentRepository::map)
         .optional();
+  }
+
+  /** Los adjuntos que existen entre {@code ids}; los que no, simplemente no vienen. */
+  public List<Attachment> findByIds(Collection<Long> ids) {
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql("select %s from attachments where id in (:ids)".formatted(COLUMNS))
+        .param("ids", ids)
+        .query(AttachmentRepository::map)
+        .list();
+  }
+
+  /** Los adjuntos de estos mensajes, por orden de creación. */
+  public List<Attachment> findByMessageIds(Collection<Long> messageIds) {
+    if (messageIds.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            "select %s from attachments where message_id in (:ids) order by id".formatted(COLUMNS))
+        .param("ids", messageIds)
+        .query(AttachmentRepository::map)
+        .list();
+  }
+
+  /**
+   * Une los adjuntos al mensaje, una sola vez cada uno. El {@code UPDATE} solo toca los que son del
+   * autor, del canal, ya confirmados y todavía libres: si dos mensajes compiten por el mismo
+   * adjunto, el segundo ve {@code message_id} lleno y cuenta menos filas. Devuelve cuántas unió;
+   * quien llama revierte la transacción si no son todas.
+   */
+  public int claim(Collection<Long> ids, Long uploaderId, Long channelId, Long messageId) {
+    return jdbc.sql(
+            """
+            update attachments set message_id = :messageId
+            where id in (:ids) and uploader_id = :uploaderId and channel_id = :channelId
+              and uploaded_at is not null and message_id is null
+            """)
+        .param("messageId", messageId)
+        .param("ids", ids)
+        .param("uploaderId", uploaderId)
+        .param("channelId", channelId)
+        .update();
   }
 
   /** Marca la subida como confirmada. Repetirlo no cambia la hora: devuelve falso si ya estaba. */
