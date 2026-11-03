@@ -2,11 +2,13 @@ package com.jsav.chat.attachment;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jsav.chat.attachment.AttachmentDtos.AttachmentInfo;
+import com.jsav.chat.attachment.AttachmentDtos.DownloadResponse;
 import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
 import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
 import com.jsav.chat.common.BadRequestException;
@@ -107,6 +109,30 @@ class AttachmentControllerTest {
     mvc.perform(post("/attachments/2/complete").with(jwt().jwt(j -> j.subject("7"))))
         .andExpect(status().isBadRequest());
     mvc.perform(post("/attachments/3/complete").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void download_needsASession() throws Exception {
+    mvc.perform(get("/attachments/11")).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void download_returnsAJsonWithTheUrl_notARedirect() throws Exception {
+    when(service.download(7L, 11L))
+        .thenReturn(
+            new DownloadResponse("http://s3/x?sig=1", Instant.parse("2026-11-03T10:00:00Z")));
+
+    mvc.perform(get("/attachments/11").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.url").value("http://s3/x?sig=1"));
+  }
+
+  @Test
+  void download_ofSomethingTheUserCannotSee_is404() throws Exception {
+    when(service.download(7L, 12L)).thenThrow(new NotFoundException("Adjunto no encontrado"));
+
+    mvc.perform(get("/attachments/12").with(jwt().jwt(j -> j.subject("7"))))
         .andExpect(status().isNotFound());
   }
 

@@ -1,12 +1,14 @@
 package com.jsav.chat.attachment;
 
 import com.jsav.chat.attachment.AttachmentDtos.AttachmentInfo;
+import com.jsav.chat.attachment.AttachmentDtos.DownloadResponse;
 import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
 import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,5 +38,14 @@ public class AttachmentController {
   @PostMapping("/attachments/{attachmentId}/complete")
   AttachmentInfo complete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long attachmentId) {
     return service.complete(Long.valueOf(jwt.getSubject()), attachmentId);
+  }
+
+  /**
+   * Una URL de 60 s para bajar el archivo. Devuelve JSON y no un redirect porque el JWT vive en el
+   * navegador y un {@code <img src>} no manda el encabezado {@code Authorization}.
+   */
+  @GetMapping("/attachments/{attachmentId}")
+  DownloadResponse download(@AuthenticationPrincipal Jwt jwt, @PathVariable Long attachmentId) {
+    return service.download(Long.valueOf(jwt.getSubject()), attachmentId);
   }
 }

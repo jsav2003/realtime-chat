@@ -3,6 +3,7 @@ package com.jsav.chat.attachment;
 import com.jsav.chat.access.AccessPolicy;
 import com.jsav.chat.access.ChannelAction;
 import com.jsav.chat.attachment.AttachmentDtos.AttachmentInfo;
+import com.jsav.chat.attachment.AttachmentDtos.DownloadResponse;
 import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
 import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
 import com.jsav.chat.common.BadRequestException;
@@ -93,6 +94,30 @@ public class AttachmentService {
     }
     attachments.markUploaded(a.id());
     return AttachmentInfo.from(attachments.findById(a.id()).orElseThrow());
+  }
+
+  /**
+   * Una URL de descarga de 60 segundos. Se decide en el momento, con el acceso de ahora (ADR 0014):
+   * si el adjunto ya está en un mensaje, lo baja quien puede leer ese canal; si todavía no, solo su
+   * autor. Todo lo demás es 404. Un expulsado no puede bajar nada, ni de lo que ya conocía.
+   */
+  @Transactional(readOnly = true)
+  public DownloadResponse download(Long userId, Long attachmentId) {
+    Attachment a =
+        attachments
+            .findById(attachmentId)
+            .filter(found -> found.isUploaded())
+            .filter(found -> found.isAttached() || found.uploaderId().equals(userId))
+            .orElseThrow(() -> new NotFoundException("Adjunto no encontrado"));
+    policy.requireChannel(userId, a.channelId(), ChannelAction.READ);
+
+    String url =
+        storage.presignDownload(
+            a.s3Key(),
+            Disposition.header(a.filename(), a.contentType()),
+            Disposition.responseContentType(a.contentType()),
+            props.downloadTtl());
+    return new DownloadResponse(url, Instant.now().plus(props.downloadTtl()));
   }
 
   /** El adjunto es del usuario y él todavía puede escribir en su canal; si no, 404. */
