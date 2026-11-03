@@ -142,6 +142,9 @@ class AuthorizationMatrixTest {
   /** Cada envío lleva su propia clave para que ninguno cuente como reintento de otro. */
   private static final String MESSAGE_BODY_TEMPLATE = "{\"clientMsgId\":\"%s\",\"body\":\"hola\"}";
 
+  private static final String ATTACHMENT_BODY =
+      "{\"filename\":\"nota.txt\",\"contentType\":\"text/plain\",\"size\":12}";
+
   static final List<Row> MATRIX =
       List.of(
           // ---- servidores ----
@@ -386,6 +389,43 @@ class AuthorizationMatrixTest {
               200,
               200,
               200,
+              404,
+              401,
+              404),
+          // ---- adjuntos (hito 7): sube quien puede escribir en el canal ----
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "público",
+              Map.of("channelId", Ref.GENERAL),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              201,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "privado, member no está",
+              Map.of("channelId", Ref.PRIVATE),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "privado, member sí está",
+              Map.of("channelId", Ref.PRIVATE_IN),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              201,
               404,
               401,
               404),

@@ -88,6 +88,9 @@ válido.
 | `GET /channels/{channelId}/messages` | público | 200 | 200 | 200 | 404 | 401 | 404 |
 | `GET /channels/{channelId}/messages` | privado, member no está | 200 | 200 | 404 | 404 | 401 | 404 |
 | `GET /channels/{channelId}/messages` | privado, member sí está | 200 | 200 | 200 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/attachments` | público | 201 | 201 | 201 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/attachments` | privado, member no está | 201 | 201 | 404 | 404 | 401 | 404 |
+| `POST /channels/{channelId}/attachments` | privado, member sí está | 201 | 201 | 201 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | público | 204 | 204 | 204 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member sí está | 204 | 204 | 204 | 404 | 401 | 404 |
