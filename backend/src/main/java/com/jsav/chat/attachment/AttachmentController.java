@@ -1,5 +1,6 @@
 package com.jsav.chat.attachment;
 
+import com.jsav.chat.attachment.AttachmentDtos.AttachmentInfo;
 import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
 import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
 import jakarta.validation.Valid;
@@ -29,5 +30,11 @@ public class AttachmentController {
       @PathVariable Long channelId,
       @Valid @RequestBody UploadRequest req) {
     return service.requestUpload(Long.valueOf(jwt.getSubject()), channelId, req);
+  }
+
+  /** Paso 2: confirma que el archivo ya está en S3. 200 también si ya estaba confirmado. */
+  @PostMapping("/attachments/{attachmentId}/complete")
+  AttachmentInfo complete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long attachmentId) {
+    return service.complete(Long.valueOf(jwt.getSubject()), attachmentId);
   }
 }

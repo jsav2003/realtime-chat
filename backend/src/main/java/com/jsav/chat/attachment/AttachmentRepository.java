@@ -53,6 +53,19 @@ public class AttachmentRepository {
         .optional();
   }
 
+  /** Marca la subida como confirmada. Repetirlo no cambia la hora: devuelve falso si ya estaba. */
+  public boolean markUploaded(Long id) {
+    return jdbc.sql(
+                "update attachments set uploaded_at = now() where id = :id and uploaded_at is null")
+            .param("id", id)
+            .update()
+        > 0;
+  }
+
+  public void delete(Long id) {
+    jdbc.sql("delete from attachments where id = :id").param("id", id).update();
+  }
+
   static Attachment map(ResultSet rs, int row) throws SQLException {
     OffsetDateTime uploadedAt = rs.getObject("uploaded_at", OffsetDateTime.class);
     return new Attachment(

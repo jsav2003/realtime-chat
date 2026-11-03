@@ -6,8 +6,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jsav.chat.attachment.AttachmentDtos.AttachmentInfo;
 import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
 import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
+import com.jsav.chat.common.BadRequestException;
+import com.jsav.chat.common.ConflictException;
 import com.jsav.chat.common.GlobalExceptionHandler;
 import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.config.SecurityConfig;
@@ -75,6 +78,36 @@ class AttachmentControllerTest {
                   .content(body))
           .andExpect(status().isBadRequest());
     }
+  }
+
+  @Test
+  void complete_needsASession() throws Exception {
+    mvc.perform(post("/attachments/11/complete")).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void complete_returns200WithTheAttachment() throws Exception {
+    when(service.complete(7L, 11L)).thenReturn(new AttachmentInfo(11L, "a.png", 1234, "image/png"));
+
+    mvc.perform(post("/attachments/11/complete").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.id").value(11))
+        .andExpect(jsonPath("$.filename").value("a.png"))
+        .andExpect(jsonPath("$.size").value(1234));
+  }
+
+  @Test
+  void complete_mapsTheErrors() throws Exception {
+    when(service.complete(7L, 1L)).thenThrow(new ConflictException("todavía no se subió"));
+    when(service.complete(7L, 2L)).thenThrow(new BadRequestException("no pesa lo declarado"));
+    when(service.complete(7L, 3L)).thenThrow(new NotFoundException("Adjunto no encontrado"));
+
+    mvc.perform(post("/attachments/1/complete").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isConflict());
+    mvc.perform(post("/attachments/2/complete").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isBadRequest());
+    mvc.perform(post("/attachments/3/complete").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isNotFound());
   }
 
   @Test

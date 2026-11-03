@@ -22,4 +22,12 @@ public final class AttachmentDtos {
    */
   public record UploadResponse(
       Long id, String uploadUrl, Map<String, String> headers, Instant expiresAt) {}
+
+  /** Lo que se ve de un adjunto: nunca lleva la clave de S3 ni una URL. */
+  public record AttachmentInfo(Long id, String filename, long size, String contentType) {
+
+    static AttachmentInfo from(Attachment a) {
+      return new AttachmentInfo(a.id(), a.filename(), a.size(), a.contentType());
+    }
+  }
 }
