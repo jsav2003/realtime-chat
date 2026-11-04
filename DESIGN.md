@@ -189,6 +189,16 @@ filtra al leer contra el acceso de ahora.
 **Adjuntos.** El archivo nunca pasa por el backend: el cliente pide una URL prefirmada de
 S3, sube directo, y el backend solo registra el adjunto tras verificar que el objeto
 existe y respeta el tamaño máximo.
+*Implementación (ADR 0014):* tres pasos. (1) `POST /channels/{id}/attachments` crea un adjunto
+pendiente y firma un PUT de 5 min **con el tamaño y el tipo dentro de la firma**; (2) `POST
+/attachments/{id}/complete` hace un `HEAD` y, si el tamaño no es el declarado, borra el objeto y
+responde 400; (3) el mensaje lleva `attachmentIds` y un `UPDATE … WHERE message_id IS NULL` dentro de
+la transacción del envío hace que cada adjunto pertenezca a un solo mensaje (si dos compiten, uno
+se revierte con su `seq` y recibe 409). Se baja con una URL de 60 s que se pide por HTTP y se decide
+con el acceso de ese momento (`GET /attachments/{id}`); por el topic STOMP solo sale la descripción,
+nunca una URL. Hasta 4 archivos de 10 MB por mensaje; solo cuatro tipos de imagen se ven en la
+página, el resto se descarga. Los huérfanos (sin mensaje en 1 h) los borra un limpiador seguro con
+dos instancias.
 
 ## 6. Arquitectura
 
@@ -222,7 +232,8 @@ messages         (id, channel_id, seq, author_id, client_msg_id, body, created_a
                  UNIQUE (channel_id, seq)
                  UNIQUE (author_id, client_msg_id)
 read_state       (user_id, channel_id, last_read_seq)
-attachments      (id, message_id, s3_key, size, content_type)
+attachments      (id, channel_id, uploader_id, message_id NULL, s3_key UNIQUE, filename, size,
+                  content_type, created_at, uploaded_at NULL)  -- message_id se llena una sola vez
 outbox           (id, event_type, payload, created_at, published_at)
 notifications    (id, user_id, message_id, channel_id, created_at, read_at)
                  UNIQUE (message_id, user_id)                -- la deduplicación del worker
@@ -296,7 +307,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 4 · Tiempo real | 20 | STOMP con relay a RabbitMQ, dos instancias, resincronización por `seq`, autorización en `SUBSCRIBE` (y `SEND` rechazado); **arnés de entrega en verde** (hecho, ver `docs/DELIVERY.md`) |
 | 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico (hecho, ver ADR 0008 a 0010) |
 | 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde (hecho, ver ADR 0011 a 0013) |
-| 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño |
+| 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño (hecho, ver ADR 0014) |
 | 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` |
 | 9 · Despliegue y cierre | 16 | CI/CD a AWS, Playwright, medición de la §8.5, documentación |
 

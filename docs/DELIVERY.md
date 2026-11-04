@@ -222,6 +222,46 @@ ahora cuenta con una secuencia, que no se revierte. (2) El plan sembrado de menc
 usaba semillas casi consecutivas para `java.util.Random`, cuya primera salida es casi igual, y las
 menciones salían en bloques por cliente; lo notó la prueba de la tasa y ahora la semilla se mezcla.
 
+## Adjuntos (hito 7)
+
+**La garantía:** un adjunto es de **un solo mensaje**, tiene el tamaño que se declaró y solo lo baja
+quien puede leer el canal *ahora* (DESIGN.md §5, ADR 0014). No toca la garantía de entrega de los
+mensajes: el envío no habla con S3, así que un S3 lento o caído no frena ni reordena un canal.
+
+- La subida firma `Content-Length` y `Content-Type`; `POST /attachments/{id}/complete` hace un `HEAD`
+  y borra el objeto y la fila si el tamaño no es el declarado.
+- Cada adjunto se une a su mensaje con un `UPDATE … WHERE message_id IS NULL` en la transacción del
+  envío; el que pierde la carrera se revierte entero, con su `seq`.
+- Bajar es una URL de 60 s pedida por HTTP y revisada con `AccessPolicy`; por el topic STOMP solo
+  sale la descripción del archivo.
+
+### La prueba de concurrencia
+
+`AttachmentClaimConcurrencyIntegrationTest` (Postgres y S3 reales): 10 mensajes con `clientMsgId`
+distintos, a la vez, reclaman el **mismo** adjunto. Resultado: entra exactamente **1**, los otros 9
+reciben 409 y `last_seq` queda en **1** (sin huecos).
+
+### Comprobado que los tests muerden (03/11)
+
+Todo compila; el código se restauró después de cada rotura.
+
+| Rotura | Test que la detecta | Resultado |
+|---|---|---|
+| Quitar `AND message_id IS NULL` del `UPDATE` que une el adjunto | `AttachmentClaimConcurrencyIntegrationTest` | falla: **10 mensajes** se quedan con el adjunto en vez de 1 |
+| No firmar `Content-Length` en la URL de subida | `S3ObjectStorageIntegrationTest` | falla 1 de 3 (`uploadUrlSignsContentLengthAndContentType`) |
+| Saltarse el `HEAD` en `complete` | `AttachmentCompleteIntegrationTest` | fallan 2 de 6 (tamaño distinto y subida sin hacer) |
+| Descargar sin `AccessPolicy` | `AttachmentDownloadIntegrationTest` | fallan 3 de 9 (un extraño, un privado ajeno y un expulsado) |
+
+### Lo que esto no demuestra
+
+- **Adobe S3Mock no valida la firma de las URLs.** La prueba del `HEAD` sube a propósito 26 bytes a
+  una URL firmada para 25 y S3Mock responde 200; por eso el tamaño se hace cumplir con el `HEAD` y
+  no hay una prueba de que S3 de verdad rechace el cuerpo con 403. Se verifica en el hito 9.
+- **Nada en un navegador real todavía.** La subida desde el compositor (XHR con progreso) y las
+  imágenes en el chat pasaron lint, tipos y `next build`; el CORS de S3Mock se comprobó con `curl`
+  (preflight y `PUT` con `Origin`), pero no se probó a mano en Chrome.
+- **Sin límite de subidas pendientes por usuario**; el limpiador acota el daño (`docs/v2.md`).
+
 ## Lo que encontró el arnés
 
 Antes de arreglar el cliente, el arnés corrió con tres semillas. Dos pasaron y **una falló**:
