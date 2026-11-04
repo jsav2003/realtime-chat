@@ -2,7 +2,9 @@ package com.jsav.chat.attachment;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -96,6 +98,35 @@ public class AttachmentRepository {
         .param("uploaderId", uploaderId)
         .param("channelId", channelId)
         .update();
+  }
+
+  /**
+   * Bloquea hasta {@code limit} adjuntos que ningún mensaje reclamó y que nacieron antes de {@code
+   * cutoff}, los más viejos primero. {@code SKIP LOCKED}: lo que otra transacción tiene tomado
+   * (otra instancia limpiando, o un envío reclamando) se salta, igual que en el publicador de la
+   * outbox. Llamarlo dentro de una transacción; los locks duran hasta su final.
+   */
+  public List<Attachment> lockOrphans(Instant cutoff, int limit) {
+    return jdbc.sql(
+            """
+            select %s from attachments
+            where message_id is null and created_at < :cutoff
+            order by created_at, id
+            limit :limit
+            for update skip locked
+            """
+                .formatted(COLUMNS))
+        .param("cutoff", OffsetDateTime.ofInstant(cutoff, ZoneOffset.UTC))
+        .param("limit", limit)
+        .query(AttachmentRepository::map)
+        .list();
+  }
+
+  public void deleteAll(Collection<Long> ids) {
+    if (ids.isEmpty()) {
+      return;
+    }
+    jdbc.sql("delete from attachments where id in (:ids)").param("ids", ids).update();
   }
 
   /** Marca la subida como confirmada. Repetirlo no cambia la hora: devuelve falso si ya estaba. */

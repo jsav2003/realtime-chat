@@ -12,6 +12,8 @@ import org.springframework.util.unit.DataSize;
  * http://localhost:9090}): la firma incluye el host, así que no se pueden mezclar.
  *
  * <p>{@code maxSize} es el tope por archivo y {@code maxPerMessage} cuántos caben en un mensaje.
+ * {@code orphanAge} es cuánto vive un adjunto que ningún mensaje reclamó antes de que el limpiador
+ * lo borre; tiene que ser mayor que {@code uploadTtl}, o se borraría una subida todavía válida.
  */
 @ConfigurationProperties(prefix = "app.storage")
 public record StorageProperties(
@@ -24,7 +26,8 @@ public record StorageProperties(
     Duration uploadTtl,
     Duration downloadTtl,
     DataSize maxSize,
-    int maxPerMessage) {
+    int maxPerMessage,
+    Duration orphanAge) {
 
   public StorageProperties {
     require(endpoint, "endpoint");
@@ -44,6 +47,10 @@ public record StorageProperties(
     }
     if (maxPerMessage < 1) {
       throw new IllegalArgumentException("app.storage.max-per-message debe ser al menos 1");
+    }
+    if (orphanAge.compareTo(uploadTtl) <= 0) {
+      throw new IllegalArgumentException(
+          "app.storage.orphan-age debe ser mayor que app.storage.upload-ttl");
     }
   }
 
