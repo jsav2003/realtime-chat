@@ -113,7 +113,10 @@ abstract class RealtimeIntegrationTest {
                   "--app.realtime.relay-port=" + env.getProperty("app.realtime.relay-port"),
                   "--app.realtime.relay-login=" + env.getProperty("app.realtime.relay-login"),
                   "--app.realtime.relay-passcode=" + env.getProperty("app.realtime.relay-passcode"),
-                  "--app.jwt.secret=" + env.getProperty("app.jwt.secret"));
+                  "--app.jwt.secret=" + env.getProperty("app.jwt.secret"),
+                  "--app.storage.endpoint=" + env.getProperty("app.storage.endpoint"),
+                  "--app.storage.public-endpoint=" + env.getProperty("app.storage.public-endpoint"),
+                  "--app.storage.bucket=" + env.getProperty("app.storage.bucket"));
 
       portB = Integer.parseInt(instanceB.getEnvironment().getProperty("local.server.port"));
     }
