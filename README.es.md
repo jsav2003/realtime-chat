@@ -14,11 +14,11 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 6 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
+> **Estado: hito 7 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
 > la entrega en tiempo real entre dos instancias del backend, la presencia, un límite de
-> mensajes por usuario y las menciones con notificaciones que sobreviven a la muerte del worker
-> están construidos y verificados, con un arnés de entrega y uno de menciones de semillas
-> fijas. Adjuntos y búsqueda todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
+> mensajes por usuario, las menciones con notificaciones que sobreviven a la muerte del worker
+> y los adjuntos con URLs prefirmadas de S3 están construidos y verificados, con un arnés de
+> entrega y uno de menciones de semillas fijas. La búsqueda y los no leídos todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
 
 ## Estado
 
@@ -29,12 +29,12 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 | 3 | Mensajes: `seq` por canal, envío idempotente, paginación por cursor | hecho |
 | 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | hecho |
 | 5 | Presencia en varias pestañas e instancias, «escribiendo…», rate limit con token bucket atómico | hecho |
-| 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | **hecho** |
-| 7 | Adjuntos (URLs prefirmadas de S3) | planeado |
+| 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | hecho |
+| 7 | Adjuntos (URLs prefirmadas de S3) | **hecho** |
 | 8 | Búsqueda y no leídos | planeado |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hitos 2 a 6)
+## Lo que ya está demostrado (hitos 2 a 7)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -43,7 +43,7 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   miembro recibe 404 en un canal privado, para que la respuesta no confirme que existe.
 - **Una matriz de autorización como tests:** cada endpoint × 6 tipos de usuario (owner,
   admin, member, miembro de otro servidor, sin sesión, expulsado hace un segundo), un test
-  por celda, 186 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
+  por celda, 228 en total, contra un PostgreSQL real. Un test falla si existe un endpoint
   que no está en la matriz, y otro si [`docs/AUTHZ.md`](docs/AUTHZ.md) se desvía de ella.
   Rompí un permiso a propósito y agregué un endpoint sin fila para comprobar que la matriz
   lo nota; lo notó.
@@ -127,8 +127,26 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   es expulsado, sale de un privado o deja de ser admin deja de ver esas menciones sin que se
   borre ninguna fila, y la notificación de otra persona responde 404, igual que una inexistente
   (tres filas nuevas en la matriz).
+- **Un archivo nunca pasa por el backend, y su tamaño se hace cumplir dos veces.** El cliente pide
+  un `PUT` prefirmado con el tamaño y el tipo dentro de la firma, sube directo a S3 y confirma; el
+  backend hace entonces un `HEAD` y, si el objeto no pesa lo declarado, lo borra y responde 400. La
+  firma es la primera barrera, no la única: la prueba sube el tamaño equivocado a propósito y el
+  `HEAD` lo atrapa
+  ([ADR 0014](docs/adr/0014-adjuntos-subida-prefirmada-con-tamano-firmado.md)).
+- **Un adjunto pertenece a un solo mensaje.** Un `UPDATE … WHERE message_id IS NULL` condicional,
+  dentro de la transacción del envío, lo decide: diez mensajes distintos enviados a la vez con el
+  mismo adjunto dejan entrar exactamente a uno, y los nueve que pierden devuelven también su `seq`
+  (`last_seq` queda en 1). Sin la condición ganan los diez.
+- **Bajar un archivo se decide con el acceso de ahora, no el de ayer.** Una descarga es una URL de
+  60 segundos que se pide por HTTP y revisa `AccessPolicy` en ese momento, así que un expulsado
+  recibe 404 incluso de un archivo que ya conocía. Por el WebSocket solo sale la descripción del
+  archivo (nombre, tamaño, tipo), nunca una URL. Solo cuatro tipos de imagen se ven dentro de la
+  página; todo lo demás, incluidos HTML y SVG, se obliga a descargar.
+- **Límite honesto:** el emulador local de S3 (Adobe S3Mock) **no** valida la firma de las URLs, así
+  que ninguna prueba muestra a S3 de verdad rechazando un cuerpo de otro tamaño; eso se comprueba
+  en el hito 9.
 
-584 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
+678 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
 PostgreSQL, RabbitMQ y Redis reales) y 66 del arnés, formateados con Spotless.
 
 ## El diseño en 30 segundos
@@ -162,7 +180,8 @@ flowchart LR
 ```
 
 Hoy existen PostgreSQL, Redis, la API REST, el frontend, el relay STOMP de RabbitMQ, el cluster
-de dos instancias y el worker de notificaciones (un servicio aparte del cluster).
+de dos instancias, el worker de notificaciones (un servicio aparte del cluster) y los adjuntos en
+S3 (un emulador en desarrollo).
 
 ## Documentos
 
@@ -170,7 +189,7 @@ de dos instancias y el worker de notificaciones (un servicio aparte del cluster)
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | El diseño, escrito antes del código: problemas, decisiones, plan de verificación, hitos |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | Las reglas de autorización y las matrices HTTP y STOMP completas (las verifican tests) |
-| [`docs/adr/`](docs/adr) | Trece decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar, presencia, límite de mensajes, «escribiendo…» efímero, menciones y notificaciones, publicador de la outbox, worker (deduplicación, reintentos, cola de muertos) |
+| [`docs/adr/`](docs/adr) | Catorce decisiones: `seq` por canal, broker externo, publicar tras el commit, outbox, envío idempotente sin huecos, escribir solo por HTTP, cerrar sockets al expulsar, presencia, límite de mensajes, «escribiendo…» efímero, menciones y notificaciones, publicador de la outbox, worker (deduplicación, reintentos, cola de muertos), adjuntos (tamaño firmado, `HEAD`, un mensaje por adjunto) |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | La garantía de entrega, el arnés, sus resultados y sus límites |
 | [`docs/v2.md`](docs/v2.md) | Ideas que quedaron fuera a propósito (bans, revocar invitaciones…) |
 
@@ -184,7 +203,7 @@ Requisitos: Docker, Java 21 y Node 20+.
 
 ```bash
 cp .env.example .env
-docker compose up -d                     # PostgreSQL 17, Redis 7, RabbitMQ 4 (con STOMP)
+docker compose up -d                     # PostgreSQL 17, Redis 7, RabbitMQ 4 (con STOMP), emulador de S3
 
 cd backend
 ./mvnw spotless:check verify             # todos los tests; requiere Docker encendido (Testcontainers)

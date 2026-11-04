@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jsav.chat.attachment.AttachmentDtos.UploadRequest;
+import com.jsav.chat.attachment.AttachmentDtos.UploadResponse;
+import com.jsav.chat.attachment.AttachmentService;
 import com.jsav.chat.auth.JwtService;
 import com.jsav.chat.channel.ChannelDtos.ChannelResponse;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
@@ -23,6 +26,10 @@ import com.jsav.chat.server.ServerService;
 import com.jsav.chat.user.User;
 import com.jsav.chat.user.UserRepository;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -89,7 +96,11 @@ class AuthorizationMatrixTest {
     OWNER_ID,
     NEWCOMER, // miembro del servidor que no está en ningún privado
     CODE,
-    NOTIFICATION // una mención de la que se enteró member; para los demás es ajena
+    NOTIFICATION, // una mención de la que se enteró member; para los demás es ajena
+    ATTACHMENT, // un adjunto de member en #general, ya subido a S3 pero sin confirmar
+    ATTACHMENT_SENT, // un adjunto de member, confirmado y dentro de un mensaje de #general
+    ATTACHMENT_HIDDEN, // un adjunto de owner dentro de un mensaje del privado donde member NO está
+    ATTACHMENT_DRAFT // un adjunto de member, confirmado, que todavía no está en ningún mensaje
   }
 
   /** Un escenario nuevo por celda: ningún test ve lo que cambió otro. */
@@ -141,6 +152,9 @@ class AuthorizationMatrixTest {
 
   /** Cada envío lleva su propia clave para que ninguno cuente como reintento de otro. */
   private static final String MESSAGE_BODY_TEMPLATE = "{\"clientMsgId\":\"%s\",\"body\":\"hola\"}";
+
+  private static final String ATTACHMENT_BODY =
+      "{\"filename\":\"nota.txt\",\"contentType\":\"text/plain\",\"size\":12}";
 
   static final List<Row> MATRIX =
       List.of(
@@ -389,6 +403,95 @@ class AuthorizationMatrixTest {
               404,
               401,
               404),
+          // ---- adjuntos (hito 7): sube quien puede escribir en el canal ----
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "público",
+              Map.of("channelId", Ref.GENERAL),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              201,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "privado, member no está",
+              Map.of("channelId", Ref.PRIVATE),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "POST",
+              "/channels/{channelId}/attachments",
+              "privado, member sí está",
+              Map.of("channelId", Ref.PRIVATE_IN),
+              w -> ATTACHMENT_BODY,
+              201,
+              201,
+              201,
+              404,
+              401,
+              404),
+          // Confirmar la subida es solo del autor (member): el resto ni sabe que el adjunto existe.
+          row(
+              "POST",
+              "/attachments/{attachmentId}/complete",
+              "adjunto de member",
+              Map.of("attachmentId", Ref.ATTACHMENT),
+              null,
+              404,
+              404,
+              200,
+              404,
+              401,
+              404),
+          // Descargar: quien lee el canal del mensaje, con el acceso de ahora. Un adjunto que aún
+          // no
+          // está en un mensaje es solo de su autor.
+          row(
+              "GET",
+              "/attachments/{attachmentId}",
+              "en un mensaje de #general",
+              Map.of("attachmentId", Ref.ATTACHMENT_SENT),
+              null,
+              200,
+              200,
+              200,
+              404,
+              401,
+              404),
+          row(
+              "GET",
+              "/attachments/{attachmentId}",
+              "en un privado donde member no está",
+              Map.of("attachmentId", Ref.ATTACHMENT_HIDDEN),
+              null,
+              200,
+              200,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "GET",
+              "/attachments/{attachmentId}",
+              "borrador de member, sin mensaje",
+              Map.of("attachmentId", Ref.ATTACHMENT_DRAFT),
+              null,
+              404,
+              404,
+              200,
+              404,
+              401,
+              404),
           // ---- «escribiendo…» (hito 5): avisa quien puede escribir en el canal ----
           row(
               "POST",
@@ -504,6 +607,7 @@ class AuthorizationMatrixTest {
   @Autowired InviteService inviteService;
   @Autowired MessageService messageService;
   @Autowired NotificationRepository notificationRepository;
+  @Autowired AttachmentService attachmentService;
   @Autowired JdbcClient jdbc;
   @Autowired JwtService jwt;
 
@@ -675,6 +779,19 @@ class AuthorizationMatrixTest {
             .query(Long.class)
             .single();
 
+    // Un adjunto de member con su archivo ya en S3, a la espera de que él confirme la subida.
+    UploadResponse upload =
+        attachmentService.requestUpload(
+            member.getId(), general.id(), new UploadRequest("nota.txt", "text/plain", 12));
+    uploadBytes(upload, 12);
+    long sent = readyAttachment(member, general.id());
+    messageService.send(
+        member.getId(), general.id(), new SendMessageRequest(UUID.randomUUID(), "", List.of(sent)));
+    long hidden = readyAttachment(owner, priv.id());
+    messageService.send(
+        owner.getId(), priv.id(), new SendMessageRequest(UUID.randomUUID(), "", List.of(hidden)));
+    long draft = readyAttachment(member, general.id());
+
     // Con el servicio real, justo antes del request: el token sigue vigente, la membresía no.
     serverService.kick(owner.getId(), s, kicked.getId());
 
@@ -693,6 +810,37 @@ class AuthorizationMatrixTest {
     w.refs.put(Ref.NEWCOMER, String.valueOf(newcomer.getId()));
     w.refs.put(Ref.CODE, invite.code());
     w.refs.put(Ref.NOTIFICATION, String.valueOf(notificationId));
+    w.refs.put(Ref.ATTACHMENT, String.valueOf(upload.id()));
+    w.refs.put(Ref.ATTACHMENT_SENT, String.valueOf(sent));
+    w.refs.put(Ref.ATTACHMENT_HIDDEN, String.valueOf(hidden));
+    w.refs.put(Ref.ATTACHMENT_DRAFT, String.valueOf(draft));
     return w;
+  }
+
+  /** Pide, sube y confirma un adjunto: listo para enviarse o para bajarse. */
+  private long readyAttachment(User who, Long channelId) {
+    UploadResponse up =
+        attachmentService.requestUpload(
+            who.getId(), channelId, new UploadRequest("archivo.txt", "text/plain", 12));
+    uploadBytes(up, 12);
+    attachmentService.complete(who.getId(), up.id());
+    return up.id();
+  }
+
+  /** Sube los bytes a la URL firmada, como lo haría el navegador. */
+  private static void uploadBytes(UploadResponse upload, int bytes) {
+    try {
+      var put =
+          HttpRequest.newBuilder(URI.create(upload.uploadUrl()))
+              .PUT(HttpRequest.BodyPublishers.ofByteArray(new byte[bytes]));
+      upload.headers().forEach(put::header);
+      int code =
+          HttpClient.newHttpClient()
+              .send(put.build(), HttpResponse.BodyHandlers.discarding())
+              .statusCode();
+      assertThat(code).isEqualTo(200);
+    } catch (IOException | InterruptedException e) {
+      throw new IllegalStateException(e);
+    }
   }
 }

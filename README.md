@@ -14,11 +14,11 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 6 of 9.** Authorization over HTTP and WebSocket, message ordering,
-> real-time delivery across two backend instances, presence, a per-user message rate limit and
-> mentions with notifications that survive the worker dying are built and verified, including a
-> delivery harness and a mentions harness with fixed seeds. Attachments and search are not built
-> yet.
+> **Status: milestone 7 of 9.** Authorization over HTTP and WebSocket, message ordering,
+> real-time delivery across two backend instances, presence, a per-user message rate limit,
+> mentions with notifications that survive the worker dying and file attachments through
+> presigned S3 URLs are built and verified, including a delivery harness and a mentions harness
+> with fixed seeds. Search and unread counts are not built yet.
 > Nothing below claims a result that does not exist.
 
 ## Status
@@ -30,12 +30,12 @@ tested on purpose**, not just claimed:
 | 3 | Messages: per-channel `seq`, idempotent send, cursor pagination | done |
 | 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | done |
 | 5 | Presence across tabs and instances, "typing…", atomic token-bucket rate limit | done |
-| 6 | Mentions: outbox, worker, retries, dead-letter queue | **done** |
-| 7 | Attachments (presigned S3 URLs) | planned |
+| 6 | Mentions: outbox, worker, retries, dead-letter queue | done |
+| 7 | Attachments (presigned S3 URLs) | **done** |
 | 8 | Search and unread counts | planned |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestones 2 to 6)
+## What is already proven (milestones 2 to 7)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -44,7 +44,7 @@ tested on purpose**, not just claimed:
   non-member gets 404 on a private channel, so the response doesn't confirm it exists.
 - **An authorization matrix as tests:** every endpoint × 6 kinds of user (owner, admin,
   member, member of another server, unauthenticated, kicked a second ago), one test per
-  cell, 186 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
+  cell, 228 in total, against a real PostgreSQL. A test fails if an endpoint exists that is
   not in the matrix, and another fails if [`docs/AUTHZ.md`](docs/AUTHZ.md) drifts from it.
   I broke a permission on purpose and added an unlisted endpoint to check the matrix
   notices; it did.
@@ -125,8 +125,25 @@ tested on purpose**, not just claimed:
   message exists). Someone who is kicked, leaves a private channel or stops being an admin stops
   seeing those mentions without any row being deleted, and another person's notification answers
   404, the same as a missing one (three new matrix rows).
+- **A file never passes through the backend, and its size is enforced twice.** The client asks
+  for a presigned `PUT` with the size and type inside the signature, uploads straight to S3, and
+  confirms; the backend then does a `HEAD` and, if the object is not the size that was declared,
+  deletes it and answers 400. The signature is the first barrier, not the only one: the test
+  uploads the wrong size on purpose and the `HEAD` catches it
+  ([ADR 0014](docs/adr/0014-adjuntos-subida-prefirmada-con-tamano-firmado.md)).
+- **An attachment belongs to one message.** A conditional `UPDATE … WHERE message_id IS NULL`
+  inside the send transaction decides it: ten different messages sent at once with the same
+  attachment let exactly one in, and the nine that lose roll back their `seq` too (`last_seq`
+  stays at 1). Without the condition all ten win.
+- **Downloading is decided with today's access, not yesterday's.** A download is a 60-second URL
+  requested over HTTP and checked by `AccessPolicy` at that moment, so a kicked user gets 404 even
+  for a file they already knew about. What goes over the WebSocket is only the description of the
+  file (name, size, type), never a URL. Only four image types are shown inside the page; anything
+  else, including HTML and SVG, is forced to download.
+- **Honest limit:** the local S3 emulator (Adobe S3Mock) does **not** validate URL signatures, so
+  no test shows real S3 refusing a body of the wrong size; that is checked at milestone 9.
 
-584 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
+678 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
 RabbitMQ and Redis) and 66 harness tests, Spotless-formatted.
 
 ## The design in 30 seconds
@@ -159,7 +176,8 @@ flowchart LR
 ```
 
 PostgreSQL, Redis, the REST API, the frontend, the RabbitMQ STOMP relay, the two-instance
-cluster and the notification worker (a separate cluster service) exist today.
+cluster, the notification worker (a separate cluster service) and attachments on S3 (an
+emulator in development) exist today.
 
 ## Documents
 
@@ -167,7 +185,7 @@ cluster and the notification worker (a separate cluster service) exist today.
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The design, written before the code: problems, decisions, verification plan, milestones |
 | [`docs/AUTHZ.md`](docs/AUTHZ.md) | The authorization rules and the full HTTP and STOMP matrices (checked by tests) |
-| [`docs/adr/`](docs/adr) | Thirteen decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick, presence, message rate limit, ephemeral typing, mentions and notifications, the outbox publisher, the worker (deduplication, retries, dead letters) |
+| [`docs/adr/`](docs/adr) | Fourteen decision records: per-channel `seq`, external broker, publish after commit, outbox, idempotent send without gaps, HTTP-only writes, closing sockets on kick, presence, message rate limit, ephemeral typing, mentions and notifications, the outbox publisher, the worker (deduplication, retries, dead letters), attachments (signed size, `HEAD`, one message per attachment) |
 | [`docs/DELIVERY.md`](docs/DELIVERY.md) | The delivery guarantee, the harness, its results and its limits |
 | [`docs/v2.md`](docs/v2.md) | Ideas left out on purpose (bans, invite revocation…) |
 
@@ -180,7 +198,7 @@ Requirements: Docker, Java 21 and Node 20+.
 
 ```bash
 cp .env.example .env
-docker compose up -d                     # PostgreSQL 17, Redis 7, RabbitMQ 4 (STOMP enabled)
+docker compose up -d                     # PostgreSQL 17, Redis 7, RabbitMQ 4 (STOMP enabled), S3 emulator
 
 cd backend
 ./mvnw spotless:check verify             # all tests; needs Docker running (Testcontainers)

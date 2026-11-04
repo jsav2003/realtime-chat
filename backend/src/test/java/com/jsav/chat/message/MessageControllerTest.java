@@ -131,8 +131,21 @@ class MessageControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body(KEY.toString(), "   ")))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.fields.body").exists());
+        .andExpect(jsonPath("$.fields.bodyOrAttachments").exists());
     verifyNoInteractions(service);
+  }
+
+  @Test
+  void send_blankBodyWithAttachments_isAccepted() throws Exception {
+    when(service.send(7L, 3L, new SendMessageRequest(KEY, "", List.of(11L))))
+        .thenReturn(new Sent(message(1), false));
+
+    mvc.perform(
+            post("/channels/3/messages")
+                .with(jwt().jwt(j -> j.subject("7")))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"clientMsgId\":\"%s\",\"attachmentIds\":[11]}".formatted(KEY)))
+        .andExpect(status().isCreated());
   }
 
   @Test
