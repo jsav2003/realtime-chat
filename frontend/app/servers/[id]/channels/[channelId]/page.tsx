@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
+  Attachment,
   Channel,
   Member,
   Message,
@@ -16,7 +17,9 @@ import {
 import { mentionsMe, splitMentions } from "@/lib/mentions";
 import { contiguousSeqOf, lastSeqOf, mergeBySeq, sendWithRetry } from "@/lib/messages";
 import { type ConnectionState, openChannelSocket } from "@/lib/realtime";
+import { MAX_FILES_PER_MESSAGE, checkFile, formatBytes, uploadFile } from "@/lib/uploads";
 import { MemberList } from "../../members";
+import { AttachmentList } from "./attachments";
 import { MessageBody } from "./message-body";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
@@ -34,6 +37,19 @@ const TYPING_VISIBLE_MS = 4000;
 const TYPING_NOTICE_EVERY_MS = 2000;
 
 type Typers = Record<number, { name: string; at: number }>;
+
+/** Un archivo que el usuario eligió para el mensaje que está escribiendo. */
+type PendingFile = {
+  localId: string;
+  name: string;
+  size: number;
+  status: "uploading" | "ready" | "error";
+  /** De 0 a 1 mientras se sube. */
+  progress: number;
+  /** Cuando está `ready`, el adjunto ya confirmado por el servidor. */
+  attachment?: Attachment;
+  error?: string;
+};
 
 /** «Ana está escribiendo…», «Ana y Beto están escribiendo…» o «Varias personas…». */
 function typingText(names: string[]): string {
@@ -56,6 +72,7 @@ export default function ChannelPage() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<PendingFile[]>([]);
   const [sending, setSending] = useState(false);
   /**
    * Clave del envío que falló. Si el usuario vuelve a enviar el mismo texto se reutiliza, por si
@@ -238,17 +255,78 @@ export default function ChannelPage() {
     api.sendTyping(channelId).catch(() => {});
   }
 
+  const uploading = files.some((f) => f.status === "uploading");
+  const readyIds = files.flatMap((f) => (f.attachment ? [f.attachment.id] : []));
+  const canSend = (draft.trim() !== "" || readyIds.length > 0) && !uploading;
+
+  function patchFile(localId: string, patch: Partial<PendingFile>) {
+    setFiles((prev) => prev.map((f) => (f.localId === localId ? { ...f, ...patch } : f)));
+  }
+
+  /**
+   * Al elegir archivos se suben de una vez (pedir URL, PUT a S3, confirmar), sin esperar al
+   * «Enviar». Los topes se avisan aquí para no subir en vano; el servidor los vuelve a comprobar.
+   */
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    e.target.value = ""; // permite elegir el mismo archivo otra vez
+    if (picked.length === 0) return;
+    const room = MAX_FILES_PER_MESSAGE - files.length;
+    if (picked.length > room) {
+      setError(`Un mensaje admite hasta ${MAX_FILES_PER_MESSAGE} archivos`);
+    } else {
+      setError(null);
+    }
+    // Otro conjunto de archivos es otro mensaje: no se reutiliza la clave de un envío fallido.
+    setFailedKey(null);
+    for (const file of picked.slice(0, Math.max(room, 0))) {
+      const localId = crypto.randomUUID();
+      const problem = checkFile(file);
+      setFiles((prev) => [
+        ...prev,
+        {
+          localId,
+          name: file.name,
+          size: file.size,
+          status: problem ? "error" : "uploading",
+          progress: 0,
+          error: problem ?? undefined,
+        },
+      ]);
+      if (problem) continue;
+      uploadFile(channelId, file, (progress) => patchFile(localId, { progress }))
+        .then((attachment) =>
+          patchFile(localId, { status: "ready", progress: 1, attachment }),
+        )
+        .catch((err) =>
+          patchFile(localId, {
+            status: "error",
+            error:
+              err instanceof ApiError && err.body.status < 500
+                ? err.body.message
+                : "No se pudo subir",
+          }),
+        );
+    }
+  }
+
+  function removeFile(localId: string) {
+    setFiles((prev) => prev.filter((f) => f.localId !== localId));
+    setFailedKey(null);
+  }
+
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const body = draft.trim();
-    if (!body || sending) return;
+    if (!canSend || sending) return;
     const key = failedKey ?? crypto.randomUUID();
     const known = contiguousSeqOf(messagesRef.current);
     setSending(true);
     try {
-      const sent = await sendWithRetry(channelId, key, body, setRateLimitWait);
+      const sent = await sendWithRetry(channelId, key, body, readyIds, setRateLimitWait);
       addMessages([sent]);
       setDraft("");
+      setFiles([]);
       setFailedKey(null);
       setError(null);
       // Hueco: esperaba known + 1 y llegó algo mayor, así que otros escribieron entre medio.
@@ -315,6 +393,7 @@ export default function ChannelPage() {
                 #{m.seq} · {new Date(m.createdAt).toLocaleTimeString()}
               </small>{" "}
               <strong>{m.authorName}</strong>: <MessageBody pieces={pieces} />
+              <AttachmentList attachments={m.attachments ?? []} />
             </li>
           );
         })}
@@ -342,7 +421,47 @@ export default function ChannelPage() {
         </p>
       )}
 
+      {files.length > 0 && (
+        <ul
+          data-testid="pending-files"
+          style={{ listStyle: "none", padding: 0, margin: "0 0 0.5rem" }}
+        >
+          {files.map((f) => (
+            <li key={f.localId} data-status={f.status}>
+              📎 {f.name} <small>({formatBytes(f.size)})</small>{" "}
+              {f.status === "uploading" && (
+                <progress value={f.progress} max={1} aria-label={`Subiendo ${f.name}`} />
+              )}
+              {f.status === "ready" && <small>listo</small>}
+              {f.status === "error" && <small role="alert">{f.error}</small>}{" "}
+              <button
+                type="button"
+                onClick={() => removeFile(f.localId)}
+                aria-label={`Quitar ${f.name}`}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <form onSubmit={onSend} style={{ display: "flex", gap: "0.5rem" }}>
+        <label
+          title={`Adjuntar archivos (hasta ${MAX_FILES_PER_MESSAGE}, 10 MB cada uno)`}
+          style={{ cursor: channel ? "pointer" : "default" }}
+        >
+          <span aria-hidden>📎</span>
+          <input
+            type="file"
+            multiple
+            data-testid="file-input"
+            aria-label="Adjuntar archivos"
+            onChange={onPickFiles}
+            disabled={!channel || files.length >= MAX_FILES_PER_MESSAGE}
+            style={{ display: "none" }}
+          />
+        </label>
         <input
           value={draft}
           onChange={(e) => {
@@ -355,7 +474,7 @@ export default function ChannelPage() {
           disabled={!channel}
           style={{ flex: 1 }}
         />
-        <button type="submit" disabled={!channel || sending || !draft.trim()}>
+        <button type="submit" disabled={!channel || sending || !canSend}>
           {sending ? "Enviando…" : "Enviar"}
         </button>
       </form>

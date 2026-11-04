@@ -57,13 +57,14 @@ export async function sendWithRetry(
   channelId: number,
   clientMsgId: string,
   body: string,
+  attachmentIds: number[] = [],
   onRateLimited?: (waitSeconds: number) => void,
 ): Promise<Message> {
   let failures = 0;
   let rateLimited = 0;
   for (;;) {
     try {
-      return await api.sendMessage(channelId, clientMsgId, body);
+      return await api.sendMessage(channelId, clientMsgId, body, attachmentIds);
     } catch (err) {
       if (err instanceof ApiError && err.body.status === 429) {
         if (++rateLimited > MAX_RATE_LIMIT_WAITS) throw err;

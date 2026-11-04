@@ -60,6 +60,26 @@ export type Presence = { online: number[] };
 /** Quién está escribiendo en un canal. Es efímero: no se guarda ni tiene seq. */
 export type TypingEvent = { userId: number; displayName: string };
 
+/** Lo que se sabe de un adjunto. Nunca trae una URL: para verlo o bajarlo se pide una (ver `api.getAttachmentUrl`). */
+export type Attachment = {
+  id: number;
+  filename: string;
+  size: number;
+  contentType: string;
+};
+
+/** Lo que devuelve el servidor para subir un archivo directo a S3 con un PUT. */
+export type UploadTicket = {
+  id: number;
+  uploadUrl: string;
+  /** Encabezados que hay que mandar tal cual: están dentro de la firma de la URL. */
+  headers: Record<string, string>;
+  expiresAt: string;
+};
+
+/** Una URL temporal (60 s) para ver o bajar un adjunto. */
+export type AttachmentUrl = { url: string; expiresAt: string };
+
 export type Message = {
   id: number;
   channelId: number;
@@ -70,6 +90,8 @@ export type Message = {
   clientMsgId: string;
   body: string;
   createdAt: string;
+  /** Vacía en un mensaje solo de texto. */
+  attachments: Attachment[];
 };
 
 /** Siempre en orden ascendente de seq. */
@@ -202,13 +224,39 @@ export const api = {
     request<void>(`/channels/${channelId}/typing`, { method: "POST" }),
   /**
    * El mismo clientMsgId en cada reintento: el backend lo reconoce y devuelve el mensaje ya
-   * guardado (200) en vez de crear otro (201).
+   * guardado (200) en vez de crear otro (201). `attachmentIds` son adjuntos ya subidos y
+   * confirmados; con ellos el texto puede ir vacío.
    */
-  sendMessage: (channelId: number, clientMsgId: string, body: string) =>
+  sendMessage: (
+    channelId: number,
+    clientMsgId: string,
+    body: string,
+    attachmentIds: number[] = [],
+  ) =>
     request<Message>(`/channels/${channelId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ clientMsgId, body }),
+      body: JSON.stringify({ clientMsgId, body, attachmentIds }),
     }),
+  /** Paso 1 de un adjunto: declara el archivo y recibe la URL de S3 donde subirlo. */
+  requestUpload: (
+    channelId: number,
+    file: { name: string; type: string; size: number },
+  ) =>
+    request<UploadTicket>(`/channels/${channelId}/attachments`, {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        // Un archivo sin tipo conocido se sube como binario.
+        contentType: file.type || "application/octet-stream",
+        size: file.size,
+      }),
+    }),
+  /** Paso 2: avisa que el archivo ya está en S3. El servidor lo comprueba con un HEAD. */
+  completeUpload: (attachmentId: number) =>
+    request<Attachment>(`/attachments/${attachmentId}/complete`, { method: "POST" }),
+  /** Una URL de 60 s para ver o bajar el adjunto; se pide en el momento de usarla. */
+  getAttachmentUrl: (attachmentId: number) =>
+    request<AttachmentUrl>(`/attachments/${attachmentId}`),
   listMessages: (channelId: number, cursor: MessageCursor = {}) => {
     const q = new URLSearchParams();
     if (cursor.afterSeq !== undefined) q.set("after_seq", String(cursor.afterSeq));
