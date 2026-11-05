@@ -257,10 +257,29 @@ Todo compila; el código se restauró después de cada rotura.
 - **Adobe S3Mock no valida la firma de las URLs.** La prueba del `HEAD` sube a propósito 26 bytes a
   una URL firmada para 25 y S3Mock responde 200; por eso el tamaño se hace cumplir con el `HEAD` y
   no hay una prueba de que S3 de verdad rechace el cuerpo con 403. Se verifica en el hito 9.
-- **Nada en un navegador real todavía.** La subida desde el compositor (XHR con progreso) y las
-  imágenes en el chat pasaron lint, tipos y `next build`; el CORS de S3Mock se comprobó con `curl`
-  (preflight y `PUT` con `Origin`), pero no se probó a mano en Chrome.
+- **Una sola prueba a mano en el navegador** (la de abajo), con dos usuarios en la misma pestaña,
+  uno después del otro. Lo que pasa con dos navegadores a la vez queda para Playwright (hito 9).
 - **Sin límite de subidas pendientes por usuario**; el limpiador acota el daño (`docs/v2.md`).
+
+### Probado a mano en Chrome (05/11, hitos 6 y 7)
+
+Con el cluster (`backend-a`, `backend-b`, nginx, worker y S3Mock) y `next dev` apuntando al
+balanceador. Ana y Beto son usuarios nuevos en un servidor de prueba; Beto entró por invitación.
+Grabación: [`media/prueba-hitos-6-7-adjuntos-y-menciones.gif`](media/prueba-hitos-6-7-adjuntos-y-menciones.gif).
+
+| Paso | Resultado |
+|---|---|
+| Ana elige una imagen (PNG, 8 KB) y un PDF (604 B) | Los dos suben antes de enviar: `POST /attachments` 201, `PUT` directo a S3Mock 200, `complete` 200 |
+| Ana envía «Hola @beto_a0be, te paso la foto y el PDF» | `POST /messages` 201, `seq` 1; la imagen se ve en el mensaje, el PDF sale como enlace y la mención resaltada |
+| Beto entra | La campana dice **«Menciones (1)»** sin abrir el canal |
+| Beto abre la mención | Lo lleva a `#general`, `PUT /notifications/{id}/read` 204 y el contador vuelve a cero |
+| Beto ve la imagen | `GET /attachments/1` da una URL de 60 s con `inline` e `image/png` |
+| Beto baja el PDF | `GET /attachments/2` da una URL nueva de 60 s con `attachment` y `application/octet-stream`; el archivo bajado es **idéntico byte a byte** al subido |
+
+**Ojo al repetirla:** la vista de red de la extensión de Chrome marcó como **503** respuestas que
+eran **204** (`/typing`, `/notifications/{id}/read`) y la descarga del PDF. El log de nginx y un
+`fetch` interceptado en la página dieron 204, y el PDF llegó entero: el error es de la
+herramienta, no del chat.
 
 ## Lo que encontró el arnés
 
