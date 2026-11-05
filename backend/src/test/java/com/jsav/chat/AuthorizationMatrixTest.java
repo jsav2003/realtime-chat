@@ -153,6 +153,9 @@ class AuthorizationMatrixTest {
   /** Cada envío lleva su propia clave para que ninguno cuente como reintento de otro. */
   private static final String MESSAGE_BODY_TEMPLATE = "{\"clientMsgId\":\"%s\",\"body\":\"hola\"}";
 
+  /** Marcar hasta el seq 0 es válido en cualquier canal, aunque no tenga mensajes. */
+  private static final String READ_BODY = "{\"seq\":0}";
+
   private static final String ATTACHMENT_BODY =
       "{\"filename\":\"nota.txt\",\"contentType\":\"text/plain\",\"size\":12}";
 
@@ -523,6 +526,43 @@ class AuthorizationMatrixTest {
               "privado, member sí está",
               Map.of("channelId", Ref.PRIVATE_IN),
               null,
+              204,
+              204,
+              204,
+              404,
+              401,
+              404),
+          // ---- no leídos (hito 8): marca leído quien puede leer el canal ----
+          row(
+              "PUT",
+              "/channels/{channelId}/read",
+              "público",
+              Map.of("channelId", Ref.GENERAL),
+              w -> READ_BODY,
+              204,
+              204,
+              204,
+              404,
+              401,
+              404),
+          row(
+              "PUT",
+              "/channels/{channelId}/read",
+              "privado, member no está",
+              Map.of("channelId", Ref.PRIVATE),
+              w -> READ_BODY,
+              204,
+              204,
+              404,
+              404,
+              401,
+              404),
+          row(
+              "PUT",
+              "/channels/{channelId}/read",
+              "privado, member sí está",
+              Map.of("channelId", Ref.PRIVATE_IN),
+              w -> READ_BODY,
               204,
               204,
               204,
