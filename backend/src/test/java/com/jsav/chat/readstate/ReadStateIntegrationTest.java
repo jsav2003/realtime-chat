@@ -9,6 +9,7 @@ import com.jsav.chat.channel.ChannelService;
 import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.message.MessageDtos.SendMessageRequest;
 import com.jsav.chat.message.MessageService;
+import com.jsav.chat.readstate.ReadStateDtos.ChannelUnread;
 import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerDtos.CreateServerRequest;
 import com.jsav.chat.server.ServerMember;
@@ -159,6 +160,104 @@ class ReadStateIntegrationTest {
     serverService.kick(owner.getId(), serverId, ana.getId());
 
     assertThatThrownBy(() -> service.markRead(ana.getId(), general, 1))
+        .isInstanceOf(NotFoundException.class);
+  }
+
+  // ---- la resta de no leídos (DESIGN.md §3.3) ----
+
+  private ChannelUnread unreadOf(User who, Long channelId) {
+    return service.unread(who.getId(), serverId).channels().stream()
+        .filter(c -> c.channelId() == channelId.longValue())
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private boolean sees(User who, Long channelId) {
+    return service.unread(who.getId(), serverId).channels().stream()
+        .anyMatch(c -> c.channelId() == channelId.longValue());
+  }
+
+  @Test
+  void withoutAnyMark_everythingIsUnread() {
+    send(general, 5);
+
+    ChannelUnread u = unreadOf(beto, general);
+
+    assertThat(u.lastSeq()).isEqualTo(5);
+    assertThat(u.lastReadSeq()).isZero();
+    assertThat(u.unread()).isEqualTo(5);
+  }
+
+  @Test
+  void unread_isLastSeqMinusLastReadSeq() {
+    send(general, 5);
+    service.markRead(ana.getId(), general, 2);
+
+    ChannelUnread u = unreadOf(ana, general);
+
+    assertThat(u.lastSeq()).isEqualTo(5);
+    assertThat(u.lastReadSeq()).isEqualTo(2);
+    assertThat(u.unread()).isEqualTo(3);
+  }
+
+  @Test
+  void markingEverything_leavesZero_andANewMessageMakesItOne() {
+    send(general, 2);
+    service.markRead(ana.getId(), general, 999);
+    assertThat(unreadOf(ana, general).unread()).isZero();
+
+    send(general, 1);
+
+    assertThat(unreadOf(ana, general).unread()).isEqualTo(1);
+  }
+
+  @Test
+  void theSubtractionEqualsTheRealCount_evenWithRetriedSends() {
+    // Tres mensajes distintos y uno reenviado con la misma clave: el reintento no gasta seq.
+    UUID retried = UUID.randomUUID();
+    messages.send(owner.getId(), general, new SendMessageRequest(retried, "uno"));
+    messages.send(owner.getId(), general, new SendMessageRequest(retried, "uno"));
+    send(general, 2);
+
+    Long counted =
+        jdbc.sql("select count(*) from messages where channel_id = :c")
+            .param("c", general)
+            .query(Long.class)
+            .single();
+
+    assertThat(unreadOf(beto, general).unread()).isEqualTo(counted).isEqualTo(3);
+  }
+
+  @Test
+  void aPrivateChannelYouAreNotIn_isNotInYourList() {
+    send(secret, 2);
+
+    assertThat(sees(ana, secret)).isTrue();
+    assertThat(sees(beto, secret)).isFalse();
+    assertThat(sees(beto, general)).isTrue();
+    assertThat(sees(owner, secret)).isTrue(); // el owner ve todos los privados
+  }
+
+  @Test
+  void takenOutOfAPrivateChannel_itLeavesTheList() {
+    send(secret, 2);
+    service.markRead(ana.getId(), secret, 1);
+    channelService.removeMember(owner.getId(), secret, ana.getId());
+
+    assertThat(sees(ana, secret)).isFalse();
+    assertThat(sees(ana, general)).isTrue();
+  }
+
+  @Test
+  void aStrangerAndAKickedMember_getNotFoundForTheServer() {
+    User outsider =
+        users.save(
+            new User("rs-out2" + owner.getId() + "@x.test", "x", "Out", "rso2" + owner.getId()));
+    serverService.kick(owner.getId(), serverId, ana.getId());
+
+    assertThatThrownBy(() -> service.unread(outsider.getId(), serverId))
+        .isInstanceOf(NotFoundException.class);
+    assertThatThrownBy(() -> service.unread(ana.getId(), serverId))
         .isInstanceOf(NotFoundException.class);
   }
 

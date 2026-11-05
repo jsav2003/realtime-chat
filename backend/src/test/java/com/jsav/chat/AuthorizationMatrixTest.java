@@ -532,7 +532,11 @@ class AuthorizationMatrixTest {
               404,
               401,
               404),
-          // ---- no leídos (hito 8): marca leído quien puede leer el canal ----
+          // ---- no leídos (hito 8): solo de los canales que puedes leer ----
+          // Un extraño y un expulsado reciben 404 del servidor; member recibe 200 pero sin los
+          // privados ajenos (ReadStateIntegrationTest).
+          row("GET", "/servers/{serverId}/unread", "—", SERVER, null, 200, 200, 200, 404, 401, 404),
+          // Marcar leído: quien puede leer el canal.
           row(
               "PUT",
               "/channels/{channelId}/read",

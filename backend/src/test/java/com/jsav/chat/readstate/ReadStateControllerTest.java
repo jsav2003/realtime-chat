@@ -3,13 +3,19 @@ package com.jsav.chat.readstate;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jsav.chat.common.GlobalExceptionHandler;
 import com.jsav.chat.common.NotFoundException;
 import com.jsav.chat.config.SecurityConfig;
+import com.jsav.chat.readstate.ReadStateDtos.ChannelUnread;
+import com.jsav.chat.readstate.ReadStateDtos.UnreadList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +66,33 @@ class ReadStateControllerTest {
   @Test
   void aMissingSeq_is400() throws Exception {
     mvc.perform(mark("{}")).andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void unread_needsASession() throws Exception {
+    mvc.perform(get("/servers/4/unread")).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void unread_returnsTheCountsOfTheCaller() throws Exception {
+    when(service.unread(7L, 4L))
+        .thenReturn(new UnreadList(List.of(new ChannelUnread(3, 10, 4, 6))));
+
+    mvc.perform(get("/servers/4/unread").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.channels.length()").value(1))
+        .andExpect(jsonPath("$.channels[0].channelId").value(3))
+        .andExpect(jsonPath("$.channels[0].lastSeq").value(10))
+        .andExpect(jsonPath("$.channels[0].lastReadSeq").value(4))
+        .andExpect(jsonPath("$.channels[0].unread").value(6));
+  }
+
+  @Test
+  void unread_ofAServerYouAreNotIn_is404() throws Exception {
+    when(service.unread(7L, 4L)).thenThrow(new NotFoundException("Servidor no encontrado"));
+
+    mvc.perform(get("/servers/4/unread").with(jwt().jwt(j -> j.subject("7"))))
+        .andExpect(status().isNotFound());
   }
 
   @Test
