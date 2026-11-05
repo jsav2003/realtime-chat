@@ -11,6 +11,10 @@ import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerMember;
 import com.jsav.chat.server.ServerMemberId;
 import com.jsav.chat.server.ServerMemberRepository;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -71,17 +75,40 @@ public class AccessPolicy {
             .findById(new ServerMemberId(channel.getServerId(), userId))
             .map(ServerMember::role)
             .orElseThrow(() -> new NotFoundException("Canal no encontrado"));
-    boolean sees =
-        channel.kind() == ChannelKind.TEXT
-            || role.canAdminister()
-            || isChannelMember(channelId, userId);
-    if (!sees) {
+    if (!sees(channel, role, () -> isChannelMember(channelId, userId))) {
       throw new NotFoundException("Canal no encontrado");
     }
     if (!action.allows(role)) {
       throw new ForbiddenException("No tienes permiso para hacer esto en este canal");
     }
     return new ChannelAccess(channel, role);
+  }
+
+  /**
+   * La regla de visibilidad de un canal de servidor, escrita una sola vez: un público lo ve todo
+   * miembro; un privado, quien administra o quien está en {@code channel_members}. La pertenencia
+   * va como proveedor para no consultarla cuando el canal es público o quien pregunta administra
+   * (el camino de cada envío). La usan {@link #requireChannel} y {@link #readableChannels}.
+   */
+  private static boolean sees(Channel channel, Role role, BooleanSupplier inChannelMembers) {
+    return channel.kind() == ChannelKind.TEXT
+        || role.canAdminister()
+        || inChannelMembers.getAsBoolean();
+  }
+
+  /**
+   * Los canales del servidor que el usuario puede leer, en orden de id. Es {@link #requireChannel}
+   * con {@link ChannelAction#READ} aplicada a todos los canales a la vez (tres consultas, no una
+   * por canal), con la misma regla {@link #sees}. 404 si no es miembro del servidor. Lo usan la
+   * lista de canales, los no leídos y la búsqueda: quien filtra por canal visible no debe copiar la
+   * regla.
+   */
+  public List<Channel> readableChannels(Long userId, Long serverId) {
+    Role role = requireServer(userId, serverId, ServerAction.VIEW);
+    Set<Long> mine = new HashSet<>(channelMembers.channelIdsOf(serverId, userId));
+    return channels.findByServerIdOrderById(serverId).stream()
+        .filter(c -> sees(c, role, () -> mine.contains(c.getId())))
+        .toList();
   }
 
   /**

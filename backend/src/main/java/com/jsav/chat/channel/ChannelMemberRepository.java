@@ -1,5 +1,6 @@
 package com.jsav.chat.channel;
 
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -19,6 +20,15 @@ public interface ChannelMemberRepository extends JpaRepository<ChannelMember, Ch
   @Query(
       "delete from ChannelMember cm where cm.id.channelId = :channelId and cm.id.userId = :userId")
   int remove(Long channelId, Long userId);
+
+  /** Los canales de este servidor en los que el usuario está en {@code channel_members}. */
+  @Query(
+      """
+      select cm.id.channelId from ChannelMember cm
+      where cm.id.userId = :userId
+        and cm.id.channelId in (select c.id from Channel c where c.serverId = :serverId)
+      """)
+  List<Long> channelIdsOf(Long serverId, Long userId);
 
   /** Al expulsar: saca al usuario de todos los canales privados de ese servidor. */
   @Modifying
