@@ -7,7 +7,6 @@ import com.jsav.chat.channel.ChannelDtos.ChannelResponse;
 import com.jsav.chat.channel.ChannelDtos.CreateChannelRequest;
 import com.jsav.chat.common.ConflictException;
 import com.jsav.chat.common.NotFoundException;
-import com.jsav.chat.server.Role;
 import com.jsav.chat.server.ServerMemberId;
 import com.jsav.chat.server.ServerMemberRepository;
 import java.util.List;
@@ -37,12 +36,7 @@ public class ChannelService {
   /** Owner y admin ven todos; un member, los públicos y los privados donde está. */
   @Transactional(readOnly = true)
   public List<ChannelResponse> list(Long userId, Long serverId) {
-    Role role = policy.requireServer(userId, serverId, ServerAction.VIEW);
-    List<Channel> visible =
-        role.canAdminister()
-            ? channels.findByServerIdOrderById(serverId)
-            : channels.findVisibleTo(serverId, userId);
-    return visible.stream().map(ChannelResponse::from).toList();
+    return policy.readableChannels(userId, serverId).stream().map(ChannelResponse::from).toList();
   }
 
   @Transactional

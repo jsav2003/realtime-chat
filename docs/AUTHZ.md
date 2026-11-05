@@ -98,6 +98,10 @@ válido.
 | `POST /channels/{channelId}/typing` | público | 204 | 204 | 204 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
 | `POST /channels/{channelId}/typing` | privado, member sí está | 204 | 204 | 204 | 404 | 401 | 404 |
+| `GET /servers/{serverId}/unread` | — | 200 | 200 | 200 | 404 | 401 | 404 |
+| `PUT /channels/{channelId}/read` | público | 204 | 204 | 204 | 404 | 401 | 404 |
+| `PUT /channels/{channelId}/read` | privado, member no está | 204 | 204 | 404 | 404 | 401 | 404 |
+| `PUT /channels/{channelId}/read` | privado, member sí está | 204 | 204 | 204 | 404 | 401 | 404 |
 | `GET /notifications` | las tuyas | 200 | 200 | 200 | 200 | 401 | 200 |
 | `PUT /notifications/{notificationId}/read` | una notificación de member | 404 | 404 | 204 | 404 | 401 | 404 |
 | `POST /notifications/read-all` | las tuyas | 204 | 204 | 204 | 204 | 401 | 204 |
