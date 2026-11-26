@@ -281,6 +281,55 @@ eran **204** (`/typing`, `/notifications/{id}/read`) y la descarga del PDF. El l
 `fetch` interceptado en la página dieron 204, y el PDF llegó entero: el error es de la
 herramienta, no del chat.
 
+## No leídos y búsqueda (hito 8)
+
+**Las garantías:** el contador de no leídos es exacto y **nunca retrocede ni se pasa** (ADR 0015), y
+la búsqueda **nunca muestra, ni insinúa, un mensaje de un canal que no puedes leer** (ADR 0016). No
+toca la garantía de entrega: el envío no escribe `read_state` y la columna `search` la llena
+Postgres en el mismo `INSERT`.
+
+- No leídos = `last_seq − last_read_seq`. Es exacto porque el `seq` no tiene huecos; lo comprueba
+  `theSubtractionEqualsTheRealCount_evenWithRetriedSends` contra un `count(*)` real, con un reintento
+  de por medio.
+- El marcado es un solo upsert: `least(:seq, last_seq)` al insertar y `greatest(viejo, nuevo)` al
+  chocar.
+- La búsqueda filtra por `AccessPolicy.readableChannels` en el `WHERE`, antes del `LIMIT`.
+
+### Las pruebas de concurrencia
+
+`ReadStateConcurrencyIntegrationTest` (Postgres real): 20 marcados con `seq` del 1 al 20, a la vez y
+en un orden aleatorio distinto en cada una de tres repeticiones → queda **20** las tres veces. Y 10
+marcados de «todo» (`seq` 999) mezclados con 10 envíos → el cursor queda entre 1 y `last_seq` (11) y
+el contador nunca da negativo.
+
+### Comprobado que los tests muerden (25/11)
+
+Todo compila; cada rotura se aplicó sobre el árbol ya commiteado, se corrió con `clean` y se
+restauró con `git checkout`.
+
+| Rotura | Test que la detecta | Resultado |
+|---|---|---|
+| Quitar `greatest` del upsert (gana el último en escribir) | `ReadStateConcurrencyIntegrationTest`, `ReadStateIntegrationTest` | fallan las **3** repeticiones de los 20 marcados (quedó en **9**, **17** y **17** en vez de 20) y «no retrocede» |
+| Quitar `least` (guardar el `seq` tal cual) | `ReadStateIntegrationTest`, `ReadStateConcurrencyIntegrationTest` | fallan 3: «acotado», «marcar todo deja 0 y uno nuevo da 1» y la mezcla con envíos (el cursor quedó en **999** con `last_seq` 11) |
+| Buscar en todo el servidor, sin filtro de canales | `SearchAccessIntegrationTest` | fallan 4 de 9: el privado ajeno aparece, el filtro por canal, sacado del privado y `limit=1` |
+| Buscar en todo el servidor y filtrar **después** del `LIMIT`, en Java | `SearchAccessIntegrationTest` | falla **1** de 9, justo la que existe para esto: con `limit=1` y lo más nuevo en el privado, Beto recibe una página **vacía** en vez del mensaje de `#general` |
+| `readableChannels` con su propia regla, sin `canAdminister` | `AccessPolicyConsistencyTest`, `SearchAccessIntegrationTest`, `AuthorizationMatrixTest` | fallan 2 de 3 de consistencia, la del admin que ve los privados en la búsqueda y **1 celda** de la matriz (admin con `channel_id` de un privado: 404 en vez de 200) |
+
+La cuarta es la que más enseña: el filtro está, y 8 de las 9 pruebas de acceso siguen en verde. Sin
+el caso de `limit=1` con el oculto más nuevo, filtrar después del límite pasaría por correcto.
+
+En la quinta, `ReadStateIntegrationTest` **no** falla: su owner está en `channel_members` del privado
+porque lo creó, así que la regla mal copiada le da el mismo resultado. Lo atrapan las pruebas que
+miran a un admin que no está en el canal.
+
+### Lo que esto no demuestra
+
+- **El plan de la búsqueda con muchos datos.** Las pruebas tienen pocos mensajes; si Postgres usa el
+  índice GIN o recorre por id depende de los datos. El resultado no cambia, el tiempo sí. Se mide en
+  el hito 9.
+- **Sin `unaccent`:** «cancion» no encuentra «canción» (`docs/v2.md`).
+- **El frontend no está probado en un navegador** en este hito: solo lint, tipos y `next build`.
+
 ## Lo que encontró el arnés
 
 Antes de arreglar el cliente, el arnés corrió con tres semillas. Dos pasaron y **una falló**:

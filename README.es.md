@@ -14,11 +14,13 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 7 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
+> **Estado: hito 8 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
 > la entrega en tiempo real entre dos instancias del backend, la presencia, un límite de
-> mensajes por usuario, las menciones con notificaciones que sobreviven a la muerte del worker
-> y los adjuntos con URLs prefirmadas de S3 están construidos y verificados, con un arnés de
-> entrega y uno de menciones de semillas fijas. La búsqueda y los no leídos todavía no existen. Nada de lo que sigue afirma un resultado que no exista.
+> mensajes por usuario, las menciones con notificaciones que sobreviven a la muerte del worker,
+> los adjuntos con URLs prefirmadas de S3, los no leídos y la búsqueda de texto completo están
+> construidos y verificados, con un arnés de entrega y uno de menciones de semillas fijas. El
+> despliegue y las pruebas de extremo a extremo todavía no existen. Nada de lo que sigue afirma un
+> resultado que no exista.
 
 ## Estado
 
@@ -30,11 +32,11 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 | 4 | Tiempo real: relay STOMP a RabbitMQ, dos instancias, resincronización por `seq`, arnés de entrega | hecho |
 | 5 | Presencia en varias pestañas e instancias, «escribiendo…», rate limit con token bucket atómico | hecho |
 | 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | hecho |
-| 7 | Adjuntos (URLs prefirmadas de S3) | **hecho** |
-| 8 | Búsqueda y no leídos | planeado |
+| 7 | Adjuntos (URLs prefirmadas de S3) | hecho |
+| 8 | Búsqueda y no leídos | **hecho** |
 | 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
 
-## Lo que ya está demostrado (hitos 2 a 7)
+## Lo que ya está demostrado (hitos 2 a 8)
 
 - **Una sola `AccessPolicy` decide todo acceso.** Los controladores nunca revisan permisos
   por su cuenta. Lee los roles de la base de datos en cada solicitud, nunca del JWT, así
@@ -145,8 +147,20 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 - **Límite honesto:** el emulador local de S3 (Adobe S3Mock) **no** valida la firma de las URLs, así
   que ninguna prueba muestra a S3 de verdad rechazando un cuerpo de otro tamaño; eso se comprueba
   en el hito 9.
+- **Los no leídos son una resta, nunca un conteo.** `last_seq − last_read_seq` es exacto porque el
+  `seq` de cada canal no tiene huecos, así que cuesta lo mismo con diez mensajes que con diez
+  millones. El cursor de lectura es un solo upsert que nunca retrocede (`greatest`: veinte marcados
+  enviados a la vez en orden aleatorio dejan el mayor) y nunca pasa del último mensaje (`least`:
+  marcar de más no esconde lo que llegue después). El envío no cambia
+  ([ADR 0015](docs/adr/0015-no-leidos-por-resta-de-seq.md)).
+- **La búsqueda nunca muestra, ni insinúa, un canal que no puedes leer.** Busca solo en los canales
+  que devuelve `AccessPolicy.readableChannels`, la misma regla de `requireChannel` escrita una vez,
+  y el filtro va en el `WHERE`, antes del `LIMIT`: con `limit=1` y lo más nuevo en un privado donde
+  no estás, igual recibes una página llena y `hasMore` no lo delata. El resaltado se pinta con
+  elementos de React, nunca como HTML
+  ([ADR 0016](docs/adr/0016-busqueda-full-text-filtrada-antes-del-limite.md)).
 
-678 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
+782 tests del backend (unitarios, `@WebMvcTest`, integración con Testcontainers con
 PostgreSQL, RabbitMQ y Redis reales) y 66 del arnés, formateados con Spotless.
 
 ## El diseño en 30 segundos

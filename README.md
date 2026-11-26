@@ -14,12 +14,12 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 7 of 9.** Authorization over HTTP and WebSocket, message ordering,
+> **Status: milestone 8 of 9.** Authorization over HTTP and WebSocket, message ordering,
 > real-time delivery across two backend instances, presence, a per-user message rate limit,
-> mentions with notifications that survive the worker dying and file attachments through
-> presigned S3 URLs are built and verified, including a delivery harness and a mentions harness
-> with fixed seeds. Search and unread counts are not built yet.
-> Nothing below claims a result that does not exist.
+> mentions with notifications that survive the worker dying, file attachments through
+> presigned S3 URLs, unread counts and full-text search are built and verified, including a
+> delivery harness and a mentions harness with fixed seeds. Deployment and end-to-end tests are
+> not built yet. Nothing below claims a result that does not exist.
 
 ## Status
 
@@ -31,11 +31,11 @@ tested on purpose**, not just claimed:
 | 4 | Real time: STOMP relay to RabbitMQ, two instances, resync by `seq`, delivery harness | done |
 | 5 | Presence across tabs and instances, "typing…", atomic token-bucket rate limit | done |
 | 6 | Mentions: outbox, worker, retries, dead-letter queue | done |
-| 7 | Attachments (presigned S3 URLs) | **done** |
-| 8 | Search and unread counts | planned |
+| 7 | Attachments (presigned S3 URLs) | done |
+| 8 | Search and unread counts | **done** |
 | 9 | Deployment, end-to-end tests, measurements | planned |
 
-## What is already proven (milestones 2 to 7)
+## What is already proven (milestones 2 to 8)
 
 - **A single `AccessPolicy` decides every access.** Controllers never check permissions on
   their own. It reads roles from the database on every request, never from the JWT, so a
@@ -142,8 +142,20 @@ tested on purpose**, not just claimed:
   else, including HTML and SVG, is forced to download.
 - **Honest limit:** the local S3 emulator (Adobe S3Mock) does **not** validate URL signatures, so
   no test shows real S3 refusing a body of the wrong size; that is checked at milestone 9.
+- **Unread counts are one subtraction, never a count.** `last_seq − last_read_seq` is exact
+  because the per-channel `seq` has no gaps, so it costs the same with ten messages or ten million.
+  The read cursor is one upsert that never goes back (`greatest`: twenty marks sent at once in
+  random order leave the highest) and never passes the last message (`least`: marking too far does
+  not hide what arrives later). The send path is untouched
+  ([ADR 0015](docs/adr/0015-no-leidos-por-resta-de-seq.md)).
+- **Search never shows, or hints at, a channel you cannot read.** It searches only the channels
+  `AccessPolicy.readableChannels` returns, the same rule as `requireChannel` written once, and the
+  filter sits in the `WHERE`, before the `LIMIT`: with `limit=1` and the newest match in a private
+  channel you are not in, you still get a full page and `hasMore` does not give it away. Highlights
+  are drawn as React elements, never as HTML
+  ([ADR 0016](docs/adr/0016-busqueda-full-text-filtrada-antes-del-limite.md)).
 
-678 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
+782 backend tests (unit, `@WebMvcTest`, Testcontainers integration with real PostgreSQL,
 RabbitMQ and Redis) and 66 harness tests, Spotless-formatted.
 
 ## The design in 30 seconds

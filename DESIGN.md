@@ -118,6 +118,12 @@ no_leídos = channels.last_seq − read_state.last_read_seq
 Una operación constante, sin contar mensajes. La alternativa ingenua,
 `COUNT(*) WHERE created_at > última_lectura`, recorre mensajes por cada canal de cada
 usuario en cada carga de la barra lateral.
+*Implementación (ADR 0015):* el cliente marca con `PUT /channels/{id}/read` hasta el final de la
+racha sin huecos que tiene a la vista. Un solo upsert lo hace **monótono** (`greatest`: nunca
+retrocede) y **acotado** (`least` con `last_seq`: marcar de más no esconde lo que llegue después).
+Sin fila es 0, todo sin leer. `GET /servers/{id}/unread` devuelve la resta para los canales que
+`AccessPolicy.readableChannels` deja leer, sin tocar `messages`. El envío no cambia: no se escribe
+`read_state` dentro de la transacción que tiene bloqueada la fila del canal.
 
 ## 4. El segundo problema: autorización multi-servidor
 
@@ -200,6 +206,16 @@ nunca una URL. Hasta 4 archivos de 10 MB por mensaje; solo cuatro tipos de image
 página, el resto se descarga. Los huérfanos (sin mensaje en 1 h) los borra un limpiador seguro con
 dos instancias.
 
+**Búsqueda.** Full-text de Postgres sobre los mensajes de un servidor. Lo delicado no es el texto
+sino el acceso: una página de resultados no puede mostrar, ni insinuar con una página corta, un
+mensaje de un canal que la persona no puede leer.
+*Implementación (ADR 0016):* una columna `tsvector` generada (`spanish`) con índice GIN.
+`GET /servers/{id}/search?q=…` busca solo en los canales de `AccessPolicy.readableChannels`, con
+ese filtro **en el `WHERE`, antes del `LIMIT`**; los más nuevos primero y cursor por id
+(`before_id`). `websearch_to_tsquery` acepta cualquier entrada sin error. El fragmento resaltado lo
+arma `ts_headline` solo para las filas de la página, con marcadores de uso privado de Unicode que el
+frontend pinta como `<mark>` sin interpretar HTML.
+
 ## 6. Arquitectura
 
 ```
@@ -228,10 +244,11 @@ server_members   (server_id, user_id, role)            -- owner | admin | member
 invites          (code, server_id, expires_at, max_uses, uses)
 channels         (id, server_id, name, kind, last_seq) -- text | private | dm
 channel_members  (channel_id, user_id)                  -- solo canales privados y DMs
-messages         (id, channel_id, seq, author_id, client_msg_id, body, created_at)
+messages         (id, channel_id, seq, author_id, client_msg_id, body, created_at, search)
                  UNIQUE (channel_id, seq)
                  UNIQUE (author_id, client_msg_id)
-read_state       (user_id, channel_id, last_read_seq)
+                 -- search: tsvector generado de body ('spanish'), con índice GIN (ADR 0016)
+read_state       (user_id, channel_id, last_read_seq)   -- sin fila = 0; nunca baja ni pasa de last_seq
 attachments      (id, channel_id, uploader_id, message_id NULL, s3_key UNIQUE, filename, size,
                   content_type, created_at, uploaded_at NULL)  -- message_id se llena una sola vez
 outbox           (id, event_type, payload, created_at, published_at)
@@ -308,7 +325,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 5 · Presencia y rate limiting | 12 | Presencia con TTL en varias pestañas; "escribiendo…"; token bucket atómico (hecho, ver ADR 0008 a 0010) |
 | 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde (hecho, ver ADR 0011 a 0013) |
 | 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño (hecho, ver ADR 0014) |
-| 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` |
+| 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` (hecho, ver ADR 0015 y 0016) |
 | 9 · Despliegue y cierre | 16 | CI/CD a AWS, Playwright, medición de la §8.5, documentación |
 
 Total estimado: unas 124 horas.
