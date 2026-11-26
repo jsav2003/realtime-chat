@@ -115,10 +115,16 @@ class AuthorizationMatrixTest {
       String note,
       Map<String, Ref> vars,
       Function<World, String> body,
-      List<Integer> expected) {
+      List<Integer> expected,
+      String query) {
 
+    /**
+     * La ruta con sus variables y, si la fila tiene, la consulta ({@code ?q=...}), que puede usar
+     * las mismas variables. La consulta no entra en {@link #key}: la fila sigue siendo del
+     * endpoint.
+     */
     String path(World w) {
-      String path = pattern;
+      String path = query == null ? pattern : pattern + "?" + query;
       for (Map.Entry<String, Ref> v : vars.entrySet()) {
         path = path.replace("{" + v.getKey() + "}", w.refs.get(v.getValue()));
       }
@@ -143,7 +149,35 @@ class AuthorizationMatrixTest {
       int anon,
       int kicked) {
     return new Row(
-        method, pattern, note, vars, body, List.of(owner, admin, member, other, anon, kicked));
+        method,
+        pattern,
+        note,
+        vars,
+        body,
+        List.of(owner, admin, member, other, anon, kicked),
+        null);
+  }
+
+  /** Un GET con consulta ({@code ?q=...}); la consulta puede usar las variables de {@code vars}. */
+  private static Row getWithQuery(
+      String pattern,
+      String query,
+      String note,
+      Map<String, Ref> vars,
+      int owner,
+      int admin,
+      int member,
+      int other,
+      int anon,
+      int kicked) {
+    return new Row(
+        "GET",
+        pattern,
+        note,
+        vars,
+        null,
+        List.of(owner, admin, member, other, anon, kicked),
+        query);
   }
 
   private static final Map<String, Ref> NONE = Map.of();
@@ -570,6 +604,32 @@ class AuthorizationMatrixTest {
               204,
               204,
               204,
+              404,
+              401,
+              404),
+          // ---- búsqueda (hito 8): solo en los canales que puedes leer ----
+          // member recibe 200 pero sin los mensajes de los privados ajenos
+          // (SearchAccessIntegrationTest); filtrar por uno de ellos es 404, como pedir sus
+          // mensajes.
+          getWithQuery(
+              "/servers/{serverId}/search",
+              "q=hola",
+              "`q=hola`",
+              SERVER,
+              200,
+              200,
+              200,
+              404,
+              401,
+              404),
+          getWithQuery(
+              "/servers/{serverId}/search",
+              "q=hola&channel_id={channelId}",
+              "`channel_id` de un privado donde member no está",
+              Map.of("serverId", Ref.SERVER, "channelId", Ref.PRIVATE),
+              200,
+              200,
+              404,
               404,
               401,
               404),
