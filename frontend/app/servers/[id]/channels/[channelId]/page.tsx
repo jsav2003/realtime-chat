@@ -36,6 +36,12 @@ const TYPING_VISIBLE_MS = 4000;
 /** Mínimo entre avisos de «escribiendo…» al servidor; él también los frena. */
 const TYPING_NOTICE_EVERY_MS = 2000;
 
+/**
+ * Cuánto se espera antes de marcar el canal como leído. Junta en un solo PUT los mensajes que
+ * llegan seguidos y no cuenta como leído un canal que se abrió y se cerró al instante.
+ */
+const MARK_READ_DELAY_MS = 1000;
+
 type Typers = Record<number, { name: string; at: number }>;
 
 /** Un archivo que el usuario eligió para el mensaje que está escribiendo. */
@@ -227,6 +233,42 @@ export default function ChannelPage() {
       },
     });
   }, [channel, channelId, addMessages, resync, router]);
+
+  /**
+   * Marca leído hasta el final de la racha sin huecos (ADR 0015), nunca hasta el último seq: si
+   * falta el 7 y se tiene el 8, el 7 no se vio y no puede darse por leído. Solo con la pestaña a
+   * la vista; al volver a ella se marca lo que llegó mientras tanto. Si el PUT falla no pasa nada:
+   * el siguiente mensaje o la siguiente visita lo vuelve a intentar, y el servidor nunca retrocede.
+   */
+  const readUpTo = channel ? contiguousSeqOf(messages) : 0;
+  /** Lo último que el servidor confirmó haber marcado, y de qué canal (la página se reutiliza). */
+  const marked = useRef({ channelId, seq: 0 });
+  useEffect(() => {
+    if (marked.current.channelId !== channelId) marked.current = { channelId, seq: 0 };
+    if (readUpTo <= marked.current.seq) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    function schedule() {
+      if (document.visibilityState !== "visible" || timer !== undefined) return;
+      timer = setTimeout(() => {
+        api
+          .markRead(channelId, readUpTo)
+          .then(() => {
+            if (marked.current.channelId === channelId) {
+              marked.current.seq = Math.max(marked.current.seq, readUpTo);
+            }
+          })
+          .catch(() => {});
+      }, MARK_READ_DELAY_MS);
+    }
+
+    schedule();
+    document.addEventListener("visibilitychange", schedule);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", schedule);
+    };
+  }, [channelId, readUpTo]);
 
   /** Quita de «escribiendo…» a quien lleva un rato sin avisar (cada segundo). */
   useEffect(() => {
