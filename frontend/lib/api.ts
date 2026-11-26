@@ -118,6 +118,20 @@ export type NotificationItem = {
 /** `unreadCount` cuenta todas las no leídas, aunque `items` traiga solo las últimas. */
 export type NotificationList = { unreadCount: number; items: NotificationItem[] };
 
+/**
+ * Lo que llevas leído de un canal: `unread = lastSeq - lastReadSeq`. Sin marcar nada nunca,
+ * `lastReadSeq` es 0 y todo el canal cuenta como no leído.
+ */
+export type ChannelUnread = {
+  channelId: number;
+  lastSeq: number;
+  lastReadSeq: number;
+  unread: number;
+};
+
+/** Solo trae los canales que puedes leer ahora. */
+export type UnreadList = { channels: ChannelUnread[] };
+
 /** Uno de los dos cursores, o ninguno para pedir los últimos. */
 export type MessageCursor = { afterSeq?: number; beforeSeq?: number; limit?: number };
 
@@ -265,6 +279,17 @@ export const api = {
     const qs = q.toString();
     return request<MessagePage>(`/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
   },
+  /** Los no leídos de cada canal del servidor que puedes leer. */
+  getUnread: (serverId: number) => request<UnreadList>(`/servers/${serverId}/unread`),
+  /**
+   * Marca el canal como leído hasta `seq`. El servidor nunca lo hace retroceder ni lo deja pasar
+   * del último mensaje, así que mandarlo repetido o desordenado no hace daño.
+   */
+  markRead: (channelId: number, seq: number) =>
+    request<void>(`/channels/${channelId}/read`, {
+      method: "PUT",
+      body: JSON.stringify({ seq }),
+    }),
   /** Las últimas menciones que puedes ver, la más nueva primero. */
   listNotifications: (limit = 20) =>
     request<NotificationList>(`/notifications?limit=${limit}`),

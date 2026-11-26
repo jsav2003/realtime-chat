@@ -14,6 +14,57 @@ import {
 } from "@/lib/api";
 import { MemberList } from "./members";
 
+/**
+ * Cada cuánto se vuelven a pedir los no leídos. Como la presencia, es por consulta y no por aviso:
+ * el contador sube con a lo sumo este retraso.
+ */
+const UNREAD_POLL_MS = 20_000;
+
+/** Lo que se muestra junto al canal: nada, `(3)` o `(99+)`. */
+function unreadLabel(unread: number): string {
+  if (unread <= 0) return "";
+  return unread > 99 ? "(99+)" : `(${unread})`;
+}
+
+/**
+ * Los no leídos de cada canal, por id. `null` mientras no se sabe (o si falló): entonces no se
+ * pinta ningún contador, porque un cero afirmaría que todo está leído.
+ */
+function useUnread(serverId: number, enabled: boolean): Map<number, number> | null {
+  const [unread, setUnread] = useState<Map<number, number> | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    function load() {
+      api
+        .getUnread(serverId)
+        .then((u) => {
+          if (!cancelled) setUnread(new Map(u.channels.map((c) => [c.channelId, c.unread])));
+        })
+        .catch(() => {
+          if (!cancelled) setUnread(null);
+        });
+    }
+
+    load();
+    const timer = setInterval(load, UNREAD_POLL_MS);
+    // Al volver a la pestaña (o del canal con el botón «atrás»), se pide en el acto.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [serverId, enabled]);
+
+  return unread;
+}
+
 export default function ServerPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -24,6 +75,7 @@ export default function ServerPage() {
   const [invite, setInvite] = useState<Invite | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const unread = useUnread(serverId, server !== null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -97,12 +149,23 @@ export default function ServerPage() {
 
       <h2>Canales</h2>
       <ul>
-        {channels.map((c) => (
-          <li key={c.id}>
-            <Link href={`/servers/${serverId}/channels/${c.id}`}># {c.name}</Link>{" "}
-            {c.kind === "private" && <small>(privado)</small>}
-          </li>
-        ))}
+        {channels.map((c) => {
+          const count = unread?.get(c.id) ?? 0;
+          return (
+            <li key={c.id} data-testid={`channel-${c.id}`} data-unread={count}>
+              <Link
+                href={`/servers/${serverId}/channels/${c.id}`}
+                style={{ fontWeight: count > 0 ? "bold" : undefined }}
+              >
+                # {c.name}
+              </Link>{" "}
+              {count > 0 && (
+                <strong aria-label={`${count} sin leer`}>{unreadLabel(count)}</strong>
+              )}{" "}
+              {c.kind === "private" && <small>(privado)</small>}
+            </li>
+          );
+        })}
       </ul>
 
       {server && <MemberList serverId={serverId} />}
