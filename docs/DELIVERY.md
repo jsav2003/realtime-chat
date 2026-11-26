@@ -328,7 +328,25 @@ miran a un admin que no está en el canal.
   índice GIN o recorre por id depende de los datos. El resultado no cambia, el tiempo sí. Se mide en
   el hito 9.
 - **Sin `unaccent`:** «cancion» no encuentra «canción» (`docs/v2.md`).
-- **El frontend no está probado en un navegador** en este hito: solo lint, tipos y `next build`.
+- **Una sola prueba a mano en el navegador** (la de abajo), con Beto en Chrome y Ana escribiendo por
+  la API. Dos navegadores a la vez quedan para Playwright (hito 9).
+
+### Probado a mano en Chrome (25/11, hito 8)
+
+Con el cluster (`backend-a`, `backend-b`, nginx, worker) y `next dev` apuntando al balanceador. La
+base de desarrollo pasó de V8 a V10 al arrancar, sin errores. Ana (owner) y Beto (member, entró por
+invitación) son usuarios nuevos; Ana dejó dos mensajes en `#general` y uno en `#secreto`, un privado
+donde Beto no está, y dos de ellos dicen «presupuesto».
+Grabación: [`media/prueba-hito-8-no-leidos-y-busqueda.gif`](media/prueba-hito-8-no-leidos-y-busqueda.gif).
+
+| Paso | Resultado |
+|---|---|
+| Beto abre el servidor | **«# general (2)»** en negrita; `#secreto` no aparece |
+| Beto busca «presupuesto» | **Un solo resultado**, el de `#general`, con la palabra en `<mark>`; el del privado no sale |
+| Beto abre `#general` | Ve los dos mensajes en vivo; `PUT /channels/32/read` 204 (log de nginx) y su fila de `read_state` queda en `last_read_seq = 2` |
+| Beto vuelve al servidor | El contador desaparece y el canal deja de estar en negrita |
+| Ana escribe un mensaje nuevo (por la API) | Sin recargar, **«# general (1)»** aparece en la siguiente consulta (menos de 20 s) |
+| Beto busca «mensaje» | Encuentra «mañana revisamos los **mensajes** pendientes»: la derivación en español funciona |
 
 ## Lo que encontró el arnés
 
