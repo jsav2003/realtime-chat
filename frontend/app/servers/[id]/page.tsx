@@ -13,6 +13,7 @@ import {
   getToken,
 } from "@/lib/api";
 import { MemberList } from "./members";
+import { ServerSearch } from "./search";
 
 /**
  * Cada cuánto se vuelven a pedir los no leídos. Como la presencia, es por consulta y no por aviso:
@@ -167,6 +168,8 @@ export default function ServerPage() {
           );
         })}
       </ul>
+
+      {server && <ServerSearch serverId={serverId} channels={channels} />}
 
       {server && <MemberList serverId={serverId} />}
 

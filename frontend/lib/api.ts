@@ -132,6 +132,30 @@ export type ChannelUnread = {
 /** Solo trae los canales que puedes leer ahora. */
 export type UnreadList = { channels: ChannelUnread[] };
 
+/**
+ * Un mensaje que coincide con la búsqueda. `snippet` trae las palabras encontradas entre los
+ * marcadores `SEARCH_MARK_START` y `SEARCH_MARK_END` (ver `lib/search.ts`), nunca HTML.
+ */
+export type SearchResult = {
+  messageId: number;
+  channelId: number;
+  channelName: string;
+  seq: number;
+  authorName: string;
+  createdAt: string;
+  snippet: string;
+};
+
+/** Los más nuevos primero. La página siguiente se pide con `beforeId` = el último `messageId`. */
+export type SearchPage = { results: SearchResult[]; hasMore: boolean };
+
+export type SearchQuery = {
+  q: string;
+  channelId?: number;
+  beforeId?: number;
+  limit?: number;
+};
+
 /** Uno de los dos cursores, o ninguno para pedir los últimos. */
 export type MessageCursor = { afterSeq?: number; beforeSeq?: number; limit?: number };
 
@@ -290,6 +314,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ seq }),
     }),
+  /** Busca en los canales del servidor que puedes leer (o solo en `channelId`). */
+  search: (serverId: number, query: SearchQuery) => {
+    const q = new URLSearchParams({ q: query.q });
+    if (query.channelId !== undefined) q.set("channel_id", String(query.channelId));
+    if (query.beforeId !== undefined) q.set("before_id", String(query.beforeId));
+    if (query.limit !== undefined) q.set("limit", String(query.limit));
+    return request<SearchPage>(`/servers/${serverId}/search?${q.toString()}`);
+  },
   /** Las últimas menciones que puedes ver, la más nueva primero. */
   listNotifications: (limit = 20) =>
     request<NotificationList>(`/notifications?limit=${limit}`),
