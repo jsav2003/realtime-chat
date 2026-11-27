@@ -14,12 +14,15 @@ tested on purpose**, not just claimed:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: milestone 8 of 9.** Authorization over HTTP and WebSocket, message ordering,
+> **Status: finished at milestone 8.** Authorization over HTTP and WebSocket, message ordering,
 > real-time delivery across two backend instances, presence, a per-user message rate limit,
 > mentions with notifications that survive the worker dying, file attachments through
 > presigned S3 URLs, unread counts and full-text search are built and verified, including a
-> delivery harness and a mentions harness with fixed seeds. Deployment and end-to-end tests are
-> not built yet. Nothing below claims a result that does not exist.
+> delivery harness and a mentions harness with fixed seeds. Milestone 9 (cloud deployment,
+> end-to-end browser tests, latency measurements) was dropped: the project runs locally with
+> Docker Compose and was never deployed. Direct messages, listed in `DESIGN.md` §1, were not
+> built either: the schema and `AccessPolicy` know a `dm` channel, but no endpoint or screen
+> opens one. Nothing below claims a result that does not exist.
 
 ## Status
 
@@ -33,7 +36,7 @@ tested on purpose**, not just claimed:
 | 6 | Mentions: outbox, worker, retries, dead-letter queue | done |
 | 7 | Attachments (presigned S3 URLs) | done |
 | 8 | Search and unread counts | **done** |
-| 9 | Deployment, end-to-end tests, measurements | planned |
+| 9 | Deployment, end-to-end tests, measurements | dropped ([`docs/v2.md`](docs/v2.md)) |
 
 ## What is already proven (milestones 2 to 8)
 
@@ -141,7 +144,7 @@ tested on purpose**, not just claimed:
   file (name, size, type), never a URL. Only four image types are shown inside the page; anything
   else, including HTML and SVG, is forced to download.
 - **Honest limit:** the local S3 emulator (Adobe S3Mock) does **not** validate URL signatures, so
-  no test shows real S3 refusing a body of the wrong size; that is checked at milestone 9.
+  no test shows real S3 refusing a body of the wrong size. It was never checked against real S3.
 - **Unread counts are one subtraction, never a count.** `last_seq − last_read_seq` is exact
   because the per-channel `seq` has no gaps, so it costs the same with ten messages or ten million.
   The read cursor is one upsert that never goes back (`greatest`: twenty marks sent at once in
@@ -255,8 +258,9 @@ docs/       authorization matrices, delivery results, ADRs, ideas for v2
 ## Out of scope
 
 Voice and video, custom roles, bots and integrations, end-to-end encryption, federation, a
-native mobile app, and competing with Discord. See [`DESIGN.md`](DESIGN.md) §2: nothing
-outside that list enters before milestone 9.
+native mobile app, and competing with Discord (see [`DESIGN.md`](DESIGN.md) §2). The project
+closed at milestone 8, so direct messages, cloud deployment, end-to-end browser tests and the
+latency measurements of `DESIGN.md` §8.5 are out of scope too ([`docs/v2.md`](docs/v2.md)).
 
 ## License
 

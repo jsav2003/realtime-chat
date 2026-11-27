@@ -256,9 +256,9 @@ Todo compila; el código se restauró después de cada rotura.
 
 - **Adobe S3Mock no valida la firma de las URLs.** La prueba del `HEAD` sube a propósito 26 bytes a
   una URL firmada para 25 y S3Mock responde 200; por eso el tamaño se hace cumplir con el `HEAD` y
-  no hay una prueba de que S3 de verdad rechace el cuerpo con 403. Se verifica en el hito 9.
+  no hay una prueba de que S3 de verdad rechace el cuerpo con 403. No se verificó (`docs/v2.md`).
 - **Una sola prueba a mano en el navegador** (la de abajo), con dos usuarios en la misma pestaña,
-  uno después del otro. Lo que pasa con dos navegadores a la vez queda para Playwright (hito 9).
+  uno después del otro. Dos navegadores a la vez no se probaron (Playwright quedó fuera, `docs/v2.md`).
 - **Sin límite de subidas pendientes por usuario**; el limpiador acota el daño (`docs/v2.md`).
 
 ### Probado a mano en Chrome (05/11, hitos 6 y 7)
@@ -325,11 +325,11 @@ miran a un admin que no está en el canal.
 ### Lo que esto no demuestra
 
 - **El plan de la búsqueda con muchos datos.** Las pruebas tienen pocos mensajes; si Postgres usa el
-  índice GIN o recorre por id depende de los datos. El resultado no cambia, el tiempo sí. Se mide en
-  el hito 9.
+  índice GIN o recorre por id depende de los datos. El resultado no cambia, el tiempo sí. No se
+  midió (`docs/v2.md`).
 - **Sin `unaccent`:** «cancion» no encuentra «canción» (`docs/v2.md`).
 - **Una sola prueba a mano en el navegador** (la de abajo), con Beto en Chrome y Ana escribiendo por
-  la API. Dos navegadores a la vez quedan para Playwright (hito 9).
+  la API. Dos navegadores a la vez no se probaron (Playwright quedó fuera, `docs/v2.md`).
 
 ### Probado a mano en Chrome (25/11, hito 8)
 
@@ -411,11 +411,11 @@ completo.
   mismo equipo. No hay red real entre ellos ni pérdida de paquetes.
 - **El reinicio es ordenado.** `docker compose restart` manda SIGTERM y Spring cierra con
   gracia. No se probó `kill -9`, que puede dejar un mensaje confirmado en la base sin avisar
-  en vivo (el caso que ADR 0003 deja a cargo de la resincronización). Queda pendiente.
+  en vivo (el caso que ADR 0003 deja a cargo de la resincronización). No se probó (`docs/v2.md`).
 - **RabbitMQ y Postgres no se reinician.** Solo cae una instancia del backend.
 - **Los clientes son los del arnés**, que copian la lógica del frontend, no el navegador. La
-  prueba con Playwright y dos navegadores es del hito 9.
-- **No mide latencia ni rendimiento** (DESIGN.md §8.5): eso también es del hito 9.
+  prueba con Playwright y dos navegadores no se hizo (`docs/v2.md`).
+- **No mide latencia ni rendimiento** (DESIGN.md §8.5): tampoco se hizo (`docs/v2.md`).
 - **Una resincronización final siempre ayuda.** Por eso el informe separa lo que llegó en
   vivo, lo que trajo la resincronización y cuántos mensajes faltaban antes de la final.
 
@@ -427,7 +427,7 @@ Y, para las notificaciones del hito 6:
 - **Las caídas del test grande son excepciones, no procesos que desaparecen.** Para RabbitMQ
   equivalen a un mensaje sin confirmar, que es lo que importa para la deduplicación, pero no
   prueban lo que pasa con el estado en memoria de un proceso muerto (el worker no guarda ninguno).
-- **No mide la latencia de las notificaciones** (DESIGN.md §8.5, hito 9). La interfaz las consulta
+- **No mide la latencia de las notificaciones** (DESIGN.md §8.5, no se hizo). La interfaz las consulta
   cada 20 s, así que se ven con ese retraso más lo que tarde el publicador y el worker.
 - **Un mensaje que mata el proceso en bucle** no cuenta como intento y no llegaría a la cola de
   mensajes muertos (ADR 0013); queda en `docs/v2.md`.
