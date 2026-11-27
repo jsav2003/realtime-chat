@@ -14,13 +14,16 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 
 ![Java 21](https://img.shields.io/badge/java-21-blue) ![Spring Boot 4.1](https://img.shields.io/badge/spring%20boot-4.1-green) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> **Estado: hito 8 de 9.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
+> **Estado: terminado en el hito 8.** La autorización por HTTP y por WebSocket, el orden de los mensajes,
 > la entrega en tiempo real entre dos instancias del backend, la presencia, un límite de
 > mensajes por usuario, las menciones con notificaciones que sobreviven a la muerte del worker,
 > los adjuntos con URLs prefirmadas de S3, los no leídos y la búsqueda de texto completo están
 > construidos y verificados, con un arnés de entrega y uno de menciones de semillas fijas. El
-> despliegue y las pruebas de extremo a extremo todavía no existen. Nada de lo que sigue afirma un
-> resultado que no exista.
+> hito 9 (despliegue en la nube, pruebas de extremo a extremo en el navegador, mediciones de
+> latencia) se descartó: el proyecto corre en local con Docker Compose y nunca se desplegó.
+> Tampoco se hicieron los mensajes directos de la §1 del `DESIGN.md`: el esquema y
+> `AccessPolicy` conocen un canal `dm`, pero ningún endpoint ni pantalla lo abre. Nada de lo que
+> sigue afirma un resultado que no exista.
 
 ## Estado
 
@@ -34,7 +37,7 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
 | 6 | Menciones: outbox, worker, reintentos, cola de mensajes muertos | hecho |
 | 7 | Adjuntos (URLs prefirmadas de S3) | hecho |
 | 8 | Búsqueda y no leídos | **hecho** |
-| 9 | Despliegue, pruebas de extremo a extremo, mediciones | planeado |
+| 9 | Despliegue, pruebas de extremo a extremo, mediciones | descartado ([`docs/v2.md`](docs/v2.md)) |
 
 ## Lo que ya está demostrado (hitos 2 a 8)
 
@@ -145,8 +148,8 @@ de **dos garantías que se prueban a propósito**, no solo se afirman:
   archivo (nombre, tamaño, tipo), nunca una URL. Solo cuatro tipos de imagen se ven dentro de la
   página; todo lo demás, incluidos HTML y SVG, se obliga a descargar.
 - **Límite honesto:** el emulador local de S3 (Adobe S3Mock) **no** valida la firma de las URLs, así
-  que ninguna prueba muestra a S3 de verdad rechazando un cuerpo de otro tamaño; eso se comprueba
-  en el hito 9.
+  que ninguna prueba muestra a S3 de verdad rechazando un cuerpo de otro tamaño. Nunca se comprobó
+  contra S3 de verdad.
 - **Los no leídos son una resta, nunca un conteo.** `last_seq − last_read_seq` es exacto porque el
   `seq` de cada canal no tiene huecos, así que cuesta lo mismo con diez mensajes que con diez
   millones. El cursor de lectura es un solo upsert que nunca retrocede (`greatest`: veinte marcados
@@ -262,8 +265,10 @@ docs/       matrices de autorización, resultados de entrega, ADR, ideas para v2
 ## Fuera de alcance
 
 Voz y video, roles personalizados, bots e integraciones, cifrado de extremo a extremo,
-federación, app móvil nativa y competir con Discord. Ver la §2 de [`DESIGN.md`](DESIGN.md):
-nada fuera de esa lista entra antes del hito 9.
+federación, app móvil nativa y competir con Discord (ver la §2 de [`DESIGN.md`](DESIGN.md)).
+El proyecto se cerró en el hito 8, así que los mensajes directos, el despliegue en la nube, las
+pruebas de extremo a extremo en el navegador y las mediciones de latencia de la §8.5 del
+`DESIGN.md` también quedan fuera ([`docs/v2.md`](docs/v2.md)).
 
 ## Licencia
 

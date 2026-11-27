@@ -2,6 +2,10 @@
 
 Documento de diseño. Escrito antes del código, a propósito.
 
+> **Cierre (2026-11-26):** el proyecto terminó en el hito 8. No se hicieron el hito 9
+> (despliegue en AWS, Playwright y las mediciones de la §8.5) ni los mensajes directos de
+> la §1; están en `docs/v2.md`. El resto del documento se deja como se escribió.
+
 ---
 
 ## 1. Qué es este proyecto
@@ -326,7 +330,7 @@ mensajes por segundo en un canal, con una y con dos instancias. Se reporta el ha
 | 6 · Menciones y notificaciones | 14 | Outbox, worker, reintentos y cola de mensajes muertos; test de worker interrumpido en verde (hecho, ver ADR 0011 a 0013) |
 | 7 · Adjuntos | 10 | URLs prefirmadas de S3 y validación de tamaño (hecho, ver ADR 0014) |
 | 8 · Búsqueda y no leídos | 10 | Full-text de Postgres; no leídos por resta de `seq` (hecho, ver ADR 0015 y 0016) |
-| 9 · Despliegue y cierre | 16 | CI/CD a AWS, Playwright, medición de la §8.5, documentación |
+| 9 · Despliegue y cierre | 16 | CI/CD a AWS, Playwright, medición de la §8.5, documentación (**no se hizo**: el proyecto se cerró en el hito 8) |
 
 Total estimado: unas 124 horas.
 
